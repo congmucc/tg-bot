@@ -78,9 +78,10 @@ export function formatAddress(address: string): string {
  * 格式化数字为易读格式
  * @param num 数字
  * @param digits 保留小数位
+ * @param useUnits 是否使用K/M/B单位 (默认不使用)
  * @returns 格式化后的数字
  */
-export function formatNumber(num: number, digits = 2): string {
+export function formatNumber(num: number, digits = 2, useUnits = false): string {
   if (num === 0) return '0';
   
   // 处理非常小的数字
@@ -89,6 +90,16 @@ export function formatNumber(num: number, digits = 2): string {
   // 小于1的数显示更多小数位
   if (Math.abs(num) < 1) return num.toFixed(6);
   
+  // 如果不使用单位，直接返回格式化后的数字
+  if (!useUnits) {
+    // 根据数字大小调整小数位数
+    if (Math.abs(num) < 10) return num.toFixed(digits);
+    if (Math.abs(num) < 100) return num.toFixed(Math.max(digits - 1, 0));
+    if (Math.abs(num) < 1000) return num.toFixed(Math.max(digits - 2, 0));
+    return num.toFixed(0);
+  }
+  
+  // 以下是使用单位的情况
   // 常规数
   if (Math.abs(num) < 1000) return num.toFixed(digits);
   

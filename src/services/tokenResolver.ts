@@ -15,6 +15,55 @@ interface TokenInfo {
   logoURI?: string;
   source: string; // 标识来源: "config", "coingecko", "tokenlist"
   id?: string;    // CoinGecko ID
+  wrappedVersion?: TokenInfo; // 对于derived_unwrapped类型，引用其包装版本
+}
+
+/**
+ * 从CoinGecko获取代币信息
+ * @param symbol 代币符号
+ * @returns 代币信息或null
+ */
+async function getFromCoinGecko(symbol: string): Promise<TokenInfo | null> {
+  try {
+    // 使用CoinGecko搜索API
+    const searchResponse = await axios.get(
+      `https://api.coingecko.com/api/v3/search?query=${symbol}`
+    );
+    
+    if (searchResponse.data && 
+        searchResponse.data.coins && 
+        searchResponse.data.coins.length > 0) {
+      
+      // 尝试找到精确匹配
+      const exactMatch = searchResponse.data.coins.find(
+        (coin: any) => coin.symbol.toUpperCase() === symbol
+      );
+      
+      const bestMatch = exactMatch || searchResponse.data.coins[0];
+      
+      // 获取更多代币细节
+      const coinResponse = await axios.get(
+        `https://api.coingecko.com/api/v3/coins/${bestMatch.id}`
+      );
+      
+      if (coinResponse.data) {
+        const coin = coinResponse.data;
+        return {
+          name: coin.name,
+          symbol: coin.symbol.toUpperCase(),
+          decimals: 18, // CoinGecko默认不提供精度
+          source: 'coingecko',
+          id: coin.id,
+          logoURI: coin.image?.large
+        };
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('CoinGecko查询失败:', error);
+    return null;
+  }
 }
 
 /**
@@ -27,179 +76,123 @@ export async function resolveToken(input: string): Promise<TokenInfo | null> {
   
   // 1. 检查缓存
   if (tokenCache[input]) {
-    console.log(`从缓存获取代币信息: ${input}`);
     return tokenCache[input];
   }
   
-  // 2. 查询CoinGecko (提升到第一位)
+  // 2. 尝试从CoinGecko获取信息（优先）
   try {
-    const coinGeckoToken = await searchCoinGecko(input);
-    if (coinGeckoToken) {
-      tokenCache[input] = coinGeckoToken;
-      return coinGeckoToken;
+    const coingeckoToken = await getFromCoinGecko(input);
+    if (coingeckoToken) {
+      console.log(`从CoinGecko获取代币信息: ${input}`);
+      // 缓存结果
+      tokenCache[input] = coingeckoToken;
+      return coingeckoToken;
     }
   } catch (error) {
-    console.error(`CoinGecko查询失败: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`从CoinGecko获取 ${input} 失败:`, error);
   }
-
-  // 3. 检查本地配置 (降低优先级)
-  const ethereumToken = getTokenBySymbol(input, 'ethereum');
-  const solanaToken = getTokenBySymbol(input, 'solana');
   
-  if (ethereumToken) {
-    const token = {
-      ...ethereumToken,
+  // 3. 检查配置文件中的代币
+  let configToken = getTokenBySymbol(input, 'ethereum');
+  if (!configToken) {
+    configToken = getTokenBySymbol(input, 'solana');
+  }
+  
+  if (configToken) {
+    console.log(`从配置获取代币信息: ${input}`);
+    const tokenInfo: TokenInfo = {
+      name: configToken.name,
+      symbol: configToken.symbol,
+      address: configToken.address,
+      decimals: configToken.decimals,
       source: 'config'
     };
-    tokenCache[input] = token;
-    return token;
-  }
-  
-  if (solanaToken) {
-    const token = {
-      ...solanaToken,
-      source: 'config'
-    };
-    tokenCache[input] = token;
-    return token;
-  }
-  
-  // 4. 检查包装代币的情况
-  if (input.startsWith('W') && input.length > 1) {
-    const unwrappedSymbol = input.substring(1);
-    const unwrappedToken = await resolveToken(unwrappedSymbol);
     
-    if (unwrappedToken) {
-      // 创建包装代币信息
-      const wrappedToken = {
-        name: `Wrapped ${unwrappedToken.name}`,
+    // 缓存结果
+    tokenCache[input] = tokenInfo;
+    return tokenInfo;
+  }
+  
+  // 4. 处理特殊情况 - 包装代币
+  const wrappedMapping: Record<string, string> = {
+    'SOL': 'WSOL',
+    'BTC': 'WBTC',
+    'ETH': 'WETH'
+  };
+  
+  // 如果查询的是包装代币的原始代币，尝试查找包装代币
+  if (wrappedMapping[input]) {
+    const wrapped = await resolveToken(wrappedMapping[input]);
+    if (wrapped) {
+      console.log(`找到包装代币 ${wrappedMapping[input]} 替代 ${input}`);
+      
+      // 创建一个基于包装代币的修改版本
+      const derivedToken: TokenInfo = {
+        name: wrapped.name.replace('Wrapped ', ''),
         symbol: input,
-        decimals: unwrappedToken.decimals,
-        chainId: unwrappedToken.chainId,
-        source: 'derived',
+        address: wrapped.address,
+        decimals: wrapped.decimals,
+        source: 'derived_unwrapped',
+        wrappedVersion: wrapped
       };
-      tokenCache[input] = wrappedToken;
-      return wrappedToken;
+      
+      // 缓存结果
+      tokenCache[input] = derivedToken;
+      return derivedToken;
     }
   }
   
-  // 5. 查询Token Lists
-  try {
-    const tokenListToken = await searchTokenLists(input);
-    if (tokenListToken) {
-      tokenCache[input] = tokenListToken;
-      return tokenListToken;
+  // 5. 如果仍未找到，尝试使用代币列表服务
+  if (!tokenListsCache || (Date.now() - lastTokenListFetch > 3600000)) {
+    try {
+      console.log('刷新代币列表缓存...');
+      const response = await axios.get('https://token.jup.ag/all');
+      if (response.data) {
+        tokenListsCache = response.data;
+        lastTokenListFetch = Date.now();
+      }
+    } catch (error) {
+      console.error('获取代币列表失败:', error);
     }
-  } catch (error) {
-    console.error(`Token Lists查询失败: ${error instanceof Error ? error.message : String(error)}`);
   }
   
-  // 未找到代币
+  if (tokenListsCache) {
+    // 尝试通过符号匹配
+    const token = tokenListsCache.find((t: any) => 
+      t.symbol.toUpperCase() === input || 
+      t.name.toUpperCase() === input
+    );
+    
+    if (token) {
+      console.log(`从代币列表找到: ${token.symbol} (${token.name})`);
+      
+      const tokenInfo: TokenInfo = {
+        name: token.name,
+        symbol: token.symbol.toUpperCase(),
+        address: token.address,
+        decimals: token.decimals,
+        chainId: token.chainId,
+        logoURI: token.logoURI,
+        source: 'tokenlist'
+      };
+      
+      // 缓存结果
+      tokenCache[input] = tokenInfo;
+      return tokenInfo;
+    }
+  }
+  
+  console.log(`未找到代币: ${input}`);
   return null;
 }
 
 /**
- * 从CoinGecko搜索代币信息
+ * 检查代币符号是否有效
+ * @param symbol 代币符号
+ * @returns 是否有效
  */
-async function searchCoinGecko(input: string): Promise<TokenInfo | null> {
-  try {
-    // 使用CoinGecko search API
-    const response = await axios.get(`https://api.coingecko.com/api/v3/search?query=${input}`);
-    
-    if (response.data && response.data.coins && response.data.coins.length > 0) {
-      // 尝试找到精确匹配
-      const exactMatches = response.data.coins.filter(
-        (coin: any) => coin.symbol.toUpperCase() === input.toUpperCase()
-      );
-      
-      // 优先使用精确匹配的结果
-      const bestMatch = exactMatches.length > 0 ? exactMatches[0] : response.data.coins[0];
-      
-      // 获取更详细的代币信息
-      const coinInfo = await axios.get(`https://api.coingecko.com/api/v3/coins/${bestMatch.id}`);
-      
-      if (coinInfo.data) {
-        return {
-          name: coinInfo.data.name,
-          symbol: coinInfo.data.symbol.toUpperCase(),
-          decimals: 18, // CoinGecko不直接提供精度，使用默认值
-          logoURI: coinInfo.data.image.small,
-          source: 'coingecko',
-          id: bestMatch.id
-        };
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    console.log(`CoinGecko搜索出错: ${input}`, error);
-    return null;
-  }
-}
-
-/**
- * 加载和搜索主流Token Lists
- */
-async function searchTokenLists(input: string): Promise<TokenInfo | null> {
-  try {
-    // 每小时更新一次token lists缓存
-    const now = Date.now();
-    if (!tokenListsCache || now - lastTokenListFetch > 3600000) {
-      lastTokenListFetch = now;
-      tokenListsCache = await loadTokenLists();
-    }
-    
-    // 在lists中搜索匹配项
-    for (const key in tokenListsCache) {
-      const list = tokenListsCache[key] as any[];
-      for (const token of list) {
-        if (token.symbol.toUpperCase() === input.toUpperCase()) {
-          return {
-            name: token.name,
-            symbol: token.symbol.toUpperCase(),
-            address: token.address,
-            decimals: token.decimals,
-            chainId: token.chainId,
-            logoURI: token.logoURI,
-            source: 'tokenlist'
-          };
-        }
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    console.log(`Token Lists搜索出错: ${input}`, error);
-    return null;
-  }
-}
-
-/**
- * 加载主流Token Lists
- */
-async function loadTokenLists(): Promise<Record<string, any[]>> {
-  try {
-    // 并行加载多个token lists
-    const [uniswapResponse, sushiResponse] = await Promise.all([
-      axios.get('https://gateway.ipfs.io/ipns/tokens.uniswap.org'),
-      axios.get('https://token-list.sushi.com')
-    ]);
-    
-    return {
-      uniswap: uniswapResponse.data.tokens || [],
-      sushi: sushiResponse.data.tokens || []
-    };
-  } catch (error) {
-    console.error('加载Token Lists失败:', error);
-    return { uniswap: [], sushi: [] };
-  }
-}
-
-/**
- * 检查代币是否有效
- */
-export async function isValidToken(input: string): Promise<boolean> {
-  const token = await resolveToken(input);
+export async function isValidToken(symbol: string): Promise<boolean> {
+  const token = await resolveToken(symbol);
   return token !== null;
 }
 

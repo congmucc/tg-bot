@@ -11,9 +11,12 @@ const ERC20_ABI = [
   'function balanceOf(address account) external view returns (uint256)'
 ];
 
+/**
+ * 以太坊区块链接口实现
+ */
 class EthereumAPI {
-  private provider: ethers.providers.JsonRpcProvider;
-  private etherscanApiKey: string;
+  public provider: ethers.providers.JsonRpcProvider;
+  public etherscanApiKey: string;
 
   constructor() {
     this.provider = new ethers.providers.JsonRpcProvider(config.ETHEREUM_RPC_URL);

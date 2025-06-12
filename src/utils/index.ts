@@ -1,4 +1,23 @@
 /**
+ * 工具函数模块入口文件
+ * 导出所有工具函数
+ */
+
+// HTTP工具
+import HttpClient from './http/httpClient';
+export { HttpClient };
+
+// 加密货币工具
+export * from './crypto/cryptoUtils';
+
+// 其他工具...
+
+// 默认导出所有工具
+export default {
+  HttpClient,
+};
+
+/**
  * 格式化金额，适当添加千位分隔符和小数位数限制
  * @param amount 金额字符串或数字
  * @param decimals 小数位数（默认4位）
@@ -95,11 +114,4 @@ export function isValidEthereumAddress(address: string): boolean {
 export function isValidSolanaAddress(address: string): boolean {
   // Solana地址是一个base58编码的字符串，通常是32-44个字符
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-}
-
-export default {
-  formatAmount,
-  shortenAddress,
-  isValidEthereumAddress,
-  isValidSolanaAddress
-}; 
+} 

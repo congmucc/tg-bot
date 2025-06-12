@@ -1,66 +1,63 @@
-import dexApi from './dex';
-import blockchainApi from './blockchain';
-import axios from 'axios';
+/**
+ * API模块入口文件
+ * 导出所有API实现和聚合器
+ */
 
-// 导出所有API
-export default {
-  dex: dexApi,
-  blockchain: blockchainApi,
+// 接口
+export * from './interfaces/exchangeApi';
+
+// CEX API
+import binanceApi from './cex/binanceApi';
+import okxApi from './cex/okxApi';
+import coinbaseApi from './cex/coinbaseApi';
+import krakenApi from './cex/krakenApi';
+import huobiApi from './cex/huobiApi';
+import cexManager from './cex';
+
+// DEX API
+import raydiumApi from './dex/raydium';
+import uniswapApi from './dex/uniswap';
+import oneInchApi from './dex/oneinchApi';
+import dexManager from './dex';
+
+// 聚合器
+import priceAggregator from './aggregators/priceAggregator';
+import jupiterAggregator from './aggregators/jupiterAggregator';
+import aggregatorsManager from './aggregators';
+
+// 导出DEX API
+export const dexApis = {
+  raydium: raydiumApi,
+  uniswap: uniswapApi,
+  '1inch': oneInchApi
 };
 
-// 集中导出常用函数
-export const {
-  getPriceAcrossDexes
-} = dexApi;
+// 导出CEX API
+export const cexApis = {
+  binance: binanceApi,
+  okx: okxApi,
+  coinbase: coinbaseApi,
+  kraken: krakenApi,
+  huobi: huobiApi
+};
 
-export const {
-  getBalanceAcrossChains,
-  monitorLargeTransactions
-} = blockchainApi;
+// 导出聚合器
+export const aggregators = {
+  price: priceAggregator,
+  jupiter: jupiterAggregator
+};
 
-/**
- * 获取加密货币市场情绪指数
- */
-export async function getFearAndGreedIndex() {
-  try {
-    const response = await axios.get('https://api.alternative.me/fng/', {
-      timeout: 5000 // 5秒超时
-    });
-    
-    // 检查返回数据
-    if (!response.data || !response.data.data || !Array.isArray(response.data.data) || response.data.data.length === 0) {
-      throw new Error('API返回数据不完整');
-    }
-    
-    // 验证关键字段
-    const current = response.data.data[0];
-    if (!current || !current.value || !current.value_classification || !current.timestamp) {
-      throw new Error('当前数据不完整');
-    }
-    
-    return response.data;
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(`获取恐惧贪婪指数失败: ${err.message}`);
-  }
-}
+// 导出管理器
+export const managers = {
+  cex: cexManager,
+  dex: dexManager,
+  aggregators: aggregatorsManager
+};
 
-/**
- * 获取主要加密货币价格
- * @param symbols 代币符号列表
- */
-export async function getCryptoPrices(symbols = ['BTC', 'ETH', 'BNB']) {
-  try {
-    const symbolsStr = symbols.join(',');
-    const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price`, {
-      params: {
-        ids: symbolsStr.toLowerCase(),
-        vs_currencies: 'usd,cny'
-      }
-    });
-    return response.data;
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(`获取加密货币价格失败: ${err.message}`);
-  }
-} 
+// 默认导出所有API
+export default {
+  dex: dexApis,
+  cex: cexApis,
+  aggregators,
+  managers
+}; 

@@ -8,30 +8,48 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
  * API配置
  */
 export const API_CONFIG = {
-  // Jupiter API (Solana)
-  JUPITER_PRICE_API: process.env.JUPITER_PRICE_API || 'https://lite-api.jup.ag/price/v2',
-  JUPITER_TOKEN_LIST_API: process.env.JUPITER_TOKEN_LIST_API || 'https://token.jup.ag/all',
-  JUPITER_SWAP_API: process.env.JUPITER_SWAP_API || 'https://quote-api.jup.ag/v6/quote',
+  // Jupiter API
+  JUPITER_PRICE_API: 'https://lite-api.jup.ag/price/v2',
+  JUPITER_TOKEN_LIST_API: 'https://token.jup.ag/all',
+  JUPITER_SWAP_API: 'https://quote-api.jup.ag/v6/quote',
   
-  // Raydium API (Solana)
-  RAYDIUM_API: process.env.RAYDIUM_API || 'https://api.raydium.io/v2/main/pairs',
-  RAYDIUM_INFO_API: process.env.RAYDIUM_INFO_API || 'https://api.raydium.io/info/pairs',
+  // Raydium API
+  RAYDIUM_API: 'https://api.raydium.io/v2/main/pairs',
+  RAYDIUM_INFO_API: 'https://api.raydium.io/v2/sdk/liquidity/mainnet.json',
   
   // CoinGecko API
-  COINGECKO_API: process.env.COINGECKO_API || 'https://api.coingecko.com/api/v3',
-  COINGECKO_PRICE_API: process.env.COINGECKO_PRICE_API || 'https://api.coingecko.com/api/v3/simple/price',
-  COINGECKO_SEARCH_API: process.env.COINGECKO_SEARCH_API || 'https://api.coingecko.com/api/v3/search',
-  COINGECKO_COINS_API: process.env.COINGECKO_COINS_API || 'https://api.coingecko.com/api/v3/coins',
+  COINGECKO_API: 'https://api.coingecko.com/api/v3',
+  COINGECKO_PRICE_API: 'https://api.coingecko.com/api/v3/simple/price',
+  COINGECKO_SEARCH_API: 'https://api.coingecko.com/api/v3/search',
+  COINGECKO_COINS_API: 'https://api.coingecko.com/api/v3/coins',
   COINGECKO_COINS_LIST_API: process.env.COINGECKO_COINS_LIST_API || 'https://api.coingecko.com/api/v3/coins/list',
   COINGECKO_MARKETS_API: process.env.COINGECKO_MARKETS_API || 'https://api.coingecko.com/api/v3/coins/markets',
   
   // 中心化交易所 API
-  BINANCE_API: process.env.BINANCE_API || 'https://api.binance.com/api/v3',
-  BINANCE_TICKER_API: process.env.BINANCE_TICKER_API || 'https://api.binance.com/api/v3/ticker/price',
-  OKX_API: process.env.OKX_API || 'https://www.okx.com/api/v5',
-  OKX_TICKER_API: process.env.OKX_TICKER_API || 'https://www.okx.com/api/v5/market/ticker',
-  COINBASE_API: process.env.COINBASE_API || 'https://api.coinbase.com/v2',
-  COINBASE_PRICE_API: process.env.COINBASE_PRICE_API || 'https://api.coinbase.com/v2/prices',
+  BINANCE_API_BASE_URL: 'https://api.binance.com',
+  BINANCE_TICKER_API: 'https://api.binance.com/api/v3/ticker/price',
+  OKX_API_BASE_URL: 'https://www.okx.com',
+  OKX_TICKER_API: 'https://www.okx.com/api/v5/market/ticker',
+  COINBASE_API_BASE_URL: 'https://api.coinbase.com',
+  COINBASE_PRICE_API: 'https://api.coinbase.com/v2/prices',
+  KRAKEN_API_BASE_URL: 'https://api.kraken.com',
+  HUOBI_API_BASE_URL: 'https://api.huobi.pro',
+  
+  // DEX API
+  UNISWAP_API: 'https://api.uniswap.org/v1',
+  
+  // 聚合器 API
+  ONEINCH_API: process.env.ONEINCH_API || 'https://api.1inch.io/v5.0',
+  
+  // Token Lists
+  TOKEN_LISTS: {
+    SOLANA: 'https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/src/tokens/solana.tokenlist.json',
+    UNISWAP: 'https://gateway.ipfs.io/ipns/tokens.uniswap.org',
+    SUSHISWAP: 'https://token-list.sushi.com'
+  },
+  
+  // IPFS Gateway
+  IPFS_GATEWAY: 'https://gateway.ipfs.io/ipfs/',
   
   // 区块链浏览器
   ETHERSCAN_URL: process.env.ETHERSCAN_URL || 'https://etherscan.io',
@@ -49,16 +67,8 @@ export const API_CONFIG = {
   // 其他 API
   FEAR_GREED_API: process.env.FEAR_GREED_API || 'https://api.alternative.me/fng/',
   
-  // 代币列表 API
-  UNISWAP_TOKEN_LIST: process.env.UNISWAP_TOKEN_LIST || 'https://gateway.ipfs.io/ipns/tokens.uniswap.org',
-  SUSHI_TOKEN_LIST: process.env.SUSHI_TOKEN_LIST || 'https://token-list.sushi.com',
-  SOLANA_TOKEN_LIST: process.env.SOLANA_TOKEN_LIST || 'https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/src/tokens/solana.tokenlist.json',
-  
   // DeFi APIs
   UNISWAP_GRAPH_URL: process.env.UNISWAP_GRAPH_URL || 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',
-  
-  // 通用
-  IPFS_GATEWAY: process.env.IPFS_GATEWAY || 'https://gateway.ipfs.io/ipfs',
 };
 
 /**

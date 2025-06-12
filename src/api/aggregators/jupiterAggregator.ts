@@ -1,6 +1,7 @@
 import axios from 'axios';
-import { API_CONFIG, TOKEN_ADDRESSES } from '../config/env';
+import { API_CONFIG, TOKEN_ADDRESSES } from '../../config/env';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { ExchangeType, BlockchainType, PriceResult, IPriceAggregator } from '../interfaces/exchangeApi';
 
 // 代币缓存，避免重复请求
 const tokenCache: {[key: string]: any} = {};
@@ -22,10 +23,88 @@ const tokenDecimals: TokenDecimalsInfo = {
 };
 
 /**
- * Jupiter API服务
- * 用于查询Solana代币价格和信息
+ * Jupiter聚合器
+ * 用于聚合Solana上的DEX价格
  */
-class JupiterApi {
+class JupiterAggregator implements IPriceAggregator {
+  /**
+   * 获取聚合器名称
+   */
+  public getName(): string {
+    return 'jupiter';
+  }
+
+  /**
+   * 从多个交易所获取价格
+   * @param tokenSymbol 代币符号
+   * @param baseTokenSymbol 基础代币符号
+   * @returns 各交易所价格结果
+   */
+  public async getPrices(tokenSymbol: string, baseTokenSymbol: string = 'USDC'): Promise<PriceResult[]> {
+    try {
+      const price = await this.getTokenPrice(tokenSymbol, baseTokenSymbol);
+      return [price];
+    } catch (error) {
+      console.error(`[Jupiter] 获取价格失败:`, error);
+      return [{
+        exchange: this.getName(),
+        exchangeType: ExchangeType.AGGREGATOR,
+        blockchain: BlockchainType.SOLANA,
+        success: false,
+        error: error instanceof Error ? error.message : '未知错误'
+      }];
+    }
+  }
+
+  /**
+   * 检测价格异常值
+   * @param prices 价格结果数组
+   * @returns 处理后的价格结果数组
+   */
+  public detectOutliers(prices: PriceResult[]): PriceResult[] {
+    // 由于Jupiter本身已经聚合了多个DEX，这里不需要额外检测异常值
+    return prices;
+  }
+
+  /**
+   * 获取最佳价格
+   * @param prices 价格结果数组
+   * @returns 最佳价格结果
+   */
+  public getBestPrice(prices: PriceResult[]): PriceResult | null {
+    const successfulPrices = prices.filter(p => p.success && p.price !== undefined);
+    if (successfulPrices.length === 0) return null;
+    
+    // 对于Jupiter，直接返回第一个成功的价格即可
+    return successfulPrices[0];
+  }
+
+  /**
+   * 获取价格统计信息
+   * @param prices 价格结果数组
+   * @returns 价格统计信息
+   */
+  public getPriceStats(prices: PriceResult[]): {
+    lowest?: PriceResult;
+    highest?: PriceResult;
+    average?: number;
+    median?: number;
+    diff?: number;
+  } {
+    const successfulPrices = prices.filter(p => p.success && p.price !== undefined);
+    if (successfulPrices.length === 0) return {};
+    
+    // 对于Jupiter，只有一个价格源，所以所有统计数据都是相同的
+    const price = successfulPrices[0];
+    return {
+      lowest: price,
+      highest: price,
+      average: price.price,
+      median: price.price,
+      diff: 0
+    };
+  }
+
   /**
    * 通过符号查找代币地址
    * @param symbol 代币符号
@@ -159,21 +238,33 @@ class JupiterApi {
    * 获取代币价格
    * @param tokenSymbol 代币符号
    * @param baseSymbol 基础代币符号
-   * @returns 价格或null
+   * @returns 价格结果
    */
-  public async getTokenPrice(tokenSymbol: string, baseSymbol: string = 'USDC'): Promise<number | null> {
+  public async getTokenPrice(tokenSymbol: string, baseSymbol: string = 'USDC'): Promise<PriceResult> {
     try {
       console.log(`[Jupiter] 获取价格: ${tokenSymbol}/${baseSymbol}`);
       
       // 获取代币地址
       const tokenAddress = await this.getTokenAddressBySymbol(tokenSymbol);
       if (!tokenAddress) {
-        throw new Error(`未找到代币地址: ${tokenSymbol}`);
+        return {
+          exchange: this.getName(),
+          exchangeType: ExchangeType.AGGREGATOR,
+          blockchain: BlockchainType.SOLANA,
+          success: false,
+          error: `未找到代币地址: ${tokenSymbol}`
+        };
       }
       
       const baseAddress = await this.getTokenAddressBySymbol(baseSymbol);
       if (!baseAddress) {
-        throw new Error(`未找到基础代币地址: ${baseSymbol}`);
+        return {
+          exchange: this.getName(),
+          exchangeType: ExchangeType.AGGREGATOR,
+          blockchain: BlockchainType.SOLANA,
+          success: false,
+          error: `未找到基础代币地址: ${baseSymbol}`
+        };
       }
       
       console.log(`[Jupiter] 代币地址: ${tokenSymbol}=${tokenAddress}, ${baseSymbol}=${baseAddress}`);
@@ -223,7 +314,14 @@ class JupiterApi {
             const price = adjustedOutAmount / adjustedInAmount;
             
             console.log(`[Jupiter] ${tokenSymbol}/${baseSymbol} 价格 (通过交易API): ${price}`);
-            return price;
+            return {
+              exchange: this.getName(),
+              exchangeType: ExchangeType.AGGREGATOR,
+              blockchain: BlockchainType.SOLANA,
+              success: true,
+              price: price,
+              timestamp: Date.now()
+            };
           }
         }
       } catch (error: any) {
@@ -233,53 +331,57 @@ class JupiterApi {
       
       // 如果交易API失败，尝试使用价格API
       try {
+        // 使用新版的Jupiter V2 Price API
         const response = await axios.get(API_CONFIG.JUPITER_PRICE_API, {
           params: {
-            ids: tokenAddress,
-            vsTokens: baseAddress
+            id: tokenAddress,
+            vsToken: baseAddress
           },
           timeout: 5000 // 5秒超时
         });
         
-        if (response.data && 
-            response.data.data && 
-            response.data.data[tokenAddress] && 
-            response.data.data[tokenAddress][baseAddress]) {
-          const price = response.data.data[tokenAddress][baseAddress];
+        // V2 API的响应格式变化
+        if (response.data && response.data.data && response.data.data.price) {
+          const price = response.data.data.price;
+          
           console.log(`[Jupiter] ${tokenSymbol}/${baseSymbol} 价格 (通过价格API): ${price}`);
-          return price;
+          return {
+            exchange: this.getName(),
+            exchangeType: ExchangeType.AGGREGATOR,
+            blockchain: BlockchainType.SOLANA,
+            success: true,
+            price: price,
+            timestamp: Date.now()
+          };
         }
-      } catch (error) {
-        console.log('[Jupiter] 使用地址获取价格失败，尝试使用符号...');
-      }
-      
-      // 最后尝试使用符号
-      try {
-        const response = await axios.get(API_CONFIG.JUPITER_PRICE_API, {
-          params: {
-            ids: tokenSymbol,
-            vsToken: baseSymbol
-          },
-          timeout: 5000 // 5秒超时
-        });
         
-        if (response.data && 
-            response.data.data && 
-            response.data.data[tokenSymbol] && 
-            response.data.data[tokenSymbol].price) {
-          const price = response.data.data[tokenSymbol].price;
-          console.log(`[Jupiter] ${tokenSymbol}/${baseSymbol} 价格 (通过符号): ${price}`);
-          return price;
-        }
-      } catch (error) {
-        console.log('[Jupiter] 使用符号获取价格失败');
+        console.log(`[Jupiter] 价格API未返回有效数据`);
+        return {
+          exchange: this.getName(),
+          exchangeType: ExchangeType.AGGREGATOR,
+          blockchain: BlockchainType.SOLANA,
+          success: false,
+          error: '价格API未返回有效数据'
+        };
+      } catch (error: any) {
+        console.error('[Jupiter] 使用价格API获取价格失败:', error.message);
+        return {
+          exchange: this.getName(),
+          exchangeType: ExchangeType.AGGREGATOR,
+          blockchain: BlockchainType.SOLANA,
+          success: false,
+          error: error.message || '获取价格失败'
+        };
       }
-      
-      console.log(`[Jupiter] 未找到 ${tokenSymbol}/${baseSymbol} 价格`);
-      return null;
     } catch (error: any) {
       console.error(`[Jupiter] 获取价格失败:`, error.message);
-      return null;
+      return {
+        exchange: this.getName(),
+        exchangeType: ExchangeType.AGGREGATOR,
+        blockchain: BlockchainType.SOLANA,
+        success: false,
+        error: error.message || '获取价格失败'
+      };
     }
   }
 
@@ -316,10 +418,10 @@ class JupiterApi {
         // 对结果添加价格信息
         const tokensWithPrice = await Promise.all(matchingTokens.map(async (token) => {
           try {
-            const price = await this.getTokenPrice(token.symbol);
+            const priceResult = await this.getTokenPrice(token.symbol);
             return {
               ...token,
-              price: price || null
+              price: priceResult.success ? priceResult.price : null
             };
           } catch (error) {
             return {
@@ -342,5 +444,5 @@ class JupiterApi {
 }
 
 // 导出单例实例
-const jupiterApi = new JupiterApi();
-export default jupiterApi; 
+const jupiterAggregator = new JupiterAggregator();
+export default jupiterAggregator; 

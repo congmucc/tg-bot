@@ -1,8 +1,9 @@
 import { Context } from 'telegraf';
 import { getPriceAcrossDexes } from '../../api/dex';
 import { isValidToken, resolveToken } from '../../services/tokenResolver';
-import jupiterApi from '../../api/jupiterApi';
+import jupiterAggregator from '../../api/aggregators/jupiterAggregator';
 import { formatTokenPrice } from '../../services/price';
+import { getPriceFromCexes, CexPriceResult } from '../../api/cex';
 
 /**
  * Jupiter价格查询结果接口
@@ -102,18 +103,21 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
     const waitingMsg = await ctx.reply(`正在获取 ${tokenInfo.symbol} (${tokenInfo.name}) 在不同平台上的数据...`);
     
     // 并行获取所有价格数据
-    // 1. 获取DEX和CEX价格
-    const dexCexPromise: Promise<DexPriceResult[]> = getPriceAcrossDexes(tokenSymbol, baseTokenSymbol);
+    // 1. 获取DEX价格
+    const dexPromise: Promise<DexPriceResult[]> = getPriceAcrossDexes(tokenSymbol, baseTokenSymbol);
     
-    // 2. 获取Jupiter价格
+    // 2. 获取CEX价格
+    const cexPromise: Promise<CexPriceResult[]> = getPriceFromCexes(tokenSymbol, baseTokenSymbol);
+    
+    // 3. 获取Jupiter价格
     const jupiterPromise: Promise<JupiterPriceResult> = (async () => {
       try {
-        const jupiterPrice = await jupiterApi.getTokenPrice(tokenSymbol, baseTokenSymbol);
-        if (jupiterPrice !== null) {
-          console.log(`[Jupiter] 获取的价格: ${jupiterPrice}`);
+        const jupiterPriceResult = await jupiterAggregator.getTokenPrice(tokenSymbol, baseTokenSymbol);
+        if (jupiterPriceResult.success && jupiterPriceResult.price !== undefined) {
+          console.log(`[Jupiter] 获取的价格: ${jupiterPriceResult.price}`);
           return {
             success: true,
-            price: jupiterPrice
+            price: jupiterPriceResult.price
           };
         }
         return { success: false };
@@ -124,9 +128,10 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
     })();
     
     // 等待所有价格查询完成
-    const results = await Promise.all([dexCexPromise, jupiterPromise]);
+    const results = await Promise.all([dexPromise, cexPromise, jupiterPromise]);
     const pricesAcrossDexes = results[0];
-    const jupiterResult = results[1];
+    const pricesAcrossCexes = results[1];
+    const jupiterResult = results[2];
     
     // 如果Jupiter查询成功，将其添加到价格列表中
     if (jupiterResult.success && jupiterResult.price !== undefined) {
@@ -136,6 +141,18 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
         success: true,
         price: jupiterResult.price.toString()
       });
+    }
+    
+    // 将CEX价格添加到结果中
+    for (const cexResult of pricesAcrossCexes) {
+      if (cexResult.success && cexResult.price !== undefined) {
+        pricesAcrossDexes.push({
+          dex: cexResult.exchange,
+          chain: 'centralized', // 中心化交易所
+          success: true,
+          price: cexResult.price.toString()
+        });
+      }
     }
     
     if (pricesAcrossDexes.length === 0) {
@@ -166,7 +183,7 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
     let resultMessage = `📊 *${tokenSymbol}/${baseTokenSymbol} 交易平台价格聚合*\n---------------------\n`;
     
     // 添加代币信息
-    resultMessage += `*代币信息:* ${tokenInfo.name} (${tokenInfo.source})\n`;
+    resultMessage += `*代币信息:* ${tokenInfo.name} (${tokenInfo.source === 'coingecko' ? 'coingecko' : tokenInfo.source})\n`;
     
     // 更清晰地显示支持的交易平台
     resultMessage += `*数据来源:*\n`;
@@ -352,48 +369,56 @@ function detectOutliers(prices: PriceInfo[]): void {
     return; // 只有一个价格，无法判断异常
   }
   
-  // 特殊处理BTC/USDC或BTC/USDT情况 - 检查价格数量级差异
-  // Jupiter有时会返回一个非常低的BTC价格 (如30 USDC而不是30000 USDC)
-  const jupiterPrice = prices.find(p => p.chain === 'jupiter_aggregator');
-  const cexPrices = prices.filter(p => p.chain === 'centralized');
+  // 1. 优先使用可信交易所作为基准
+  const trustedExchanges = ['binance', 'coinbase', 'okx', 'kraken', 'huobi', 'bybit'];
+  const trustedPrices = prices.filter(p => 
+    trustedExchanges.some(ex => p.dex.toLowerCase().includes(ex))
+  );
   
-  if (jupiterPrice && cexPrices.length > 0) {
-    // 计算CEX价格的平均值
-    const cexAverage = cexPrices.reduce((sum, p) => sum + p.price, 0) / cexPrices.length;
+  // 2. 如果有足够的可信交易所数据，使用它们作为参考
+  if (trustedPrices.length >= 2) {
+    // 计算可信交易所的平均价格
+    const trustedAvg = trustedPrices.reduce((sum, p) => sum + p.price, 0) / trustedPrices.length;
+    console.log(`[异常值检测] 可信交易所平均价格: ${trustedAvg}`);
     
-    // 如果价格差异过大（一个数量级以上），直接标记为异常
-    if (cexAverage / jupiterPrice.price > 100 || jupiterPrice.price / cexAverage > 100) {
-      jupiterPrice.isOutlier = true;
-      console.log(`[异常值检测] Jupiter价格 ${jupiterPrice.price} 与CEX平均价 ${cexAverage} 相差太大，标记为异常`);
-      return; // 已经标记了异常，不需要继续检测
+    // 使用可信平均价格作为参考检测异常值
+    for (const priceInfo of prices) {
+      const deviation = Math.abs(priceInfo.price - trustedAvg) / trustedAvg;
+      // 如果与可信平均价格偏差超过25%，标记为异常
+      if (deviation > 0.25) {
+        priceInfo.isOutlier = true;
+        console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 与可信平均价 ${trustedAvg} 偏差 ${(deviation * 100).toFixed(2)}%, 标记为异常`);
+      }
+    }
+  } else {
+    // 3. 如果没有足够的可信数据，使用中位数方法
+    const priceValues = prices.map(p => p.price).sort((a, b) => a - b);
+    const mid = Math.floor(priceValues.length / 2);
+    const median = priceValues.length % 2 === 0
+      ? (priceValues[mid - 1] + priceValues[mid]) / 2
+      : priceValues[mid];
+    
+    console.log(`[异常值检测] 使用中位数方法，中位数价格: ${median}`);
+    
+    // 对于每个价格，检查与中位数的偏差
+    for (const priceInfo of prices) {
+      const deviation = Math.abs(priceInfo.price - median) / median;
+      // 正常情况下，偏差超过30%标记为异常
+      // 极端情况（相差100倍以上）也标记为异常
+      if (deviation > 0.3 || priceInfo.price / median > 100 || median / priceInfo.price > 100) {
+        priceInfo.isOutlier = true;
+        console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 被标记为异常值 (中位数: ${median}, 偏差: ${(deviation * 100).toFixed(2)}%)`);
+      }
     }
   }
   
-  // 如果价格差异过大，标记可能的异常值
-  // 1. 计算中位数
-  const priceValues = prices.map(p => p.price).sort((a, b) => a - b);
-  const mid = Math.floor(priceValues.length / 2);
-  const median = priceValues.length % 2 === 0
-    ? (priceValues[mid - 1] + priceValues[mid]) / 2
-    : priceValues[mid];
-  
-  // 2. 对于每个价格，检查与中位数的偏差
-  for (const priceInfo of prices) {
-    // 如果价格与中位数相差超过90%，或者价格与中位数相差1000倍以上，认为是异常值
-    const deviation = Math.abs(priceInfo.price - median) / median;
-    if (deviation > 0.9 || priceInfo.price / median > 1000 || median / priceInfo.price > 1000) {
-      priceInfo.isOutlier = true;
-      console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 被标记为异常值 (中位数: ${median}, 偏差: ${deviation * 100}%)`);
-    }
-  }
-  
-  // 3. 特殊处理：如果所有价格都被标记为异常，取消所有标记（避免误判）
+  // 4. 特殊处理：如果所有价格都被标记为异常，取消所有标记（避免误判）
   if (prices.every(p => p.isOutlier)) {
     console.log(`[异常值检测] 所有价格都被标记为异常，取消所有标记`);
     prices.forEach(p => p.isOutlier = false);
   }
   
-  // 4. 特殊处理：如果大多数价格都是异常值，可能需要反转标记
+  // 5. 特殊处理：如果大多数价格都是异常值，可能需要反转标记
   const outlierCount = prices.filter(p => p.isOutlier).length;
   if (outlierCount > prices.length / 2) {
     console.log(`[异常值检测] 大多数价格被标记为异常，反转标记`);

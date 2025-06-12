@@ -3,7 +3,7 @@ import { Message } from 'telegraf/typings/core/types/typegram';
 import { getTokenPrice, formatTokenPrice, getCommonTokenPrices, getCexTokenPrice } from '../../services/price';
 import { resolveToken } from '../../services/tokenResolver';
 import { getPriceAcrossDexes, isTokenSupported } from '../../api/dex';
-import jupiterApi from '../../api/jupiterApi';
+import jupiterAggregator from '../../api/aggregators/jupiterAggregator';
 import { BOT_CONFIG } from '../../config/env';
 
 // 常用加密货币符号
@@ -147,7 +147,7 @@ export async function handlePriceCommand(ctx: Context): Promise<void> {
         // 如果代币未找到，尝试使用Jupiter搜索
         try {
           console.log(`使用Jupiter搜索代币: ${tokenSymbol}...`);
-          const results = await jupiterApi.searchToken(tokenSymbol);
+          const results = await jupiterAggregator.searchToken(tokenSymbol);
           
           if (results.length > 0) {
             // 找到匹配的代币，通知用户
@@ -194,10 +194,10 @@ export async function handlePriceCommand(ctx: Context): Promise<void> {
       if (!priceInfo && (tokenInfo.source === 'config' || tokenInfo.chainId === 101)) {
         try {
           console.log(`标准API无法获取价格，尝试使用Jupiter作为备用获取 ${tokenSymbol}/${baseSymbol} 价格...`);
-          const jupiterPrice = await jupiterApi.getTokenPrice(tokenSymbol, baseSymbol);
-          if (jupiterPrice !== null) {
+          const jupiterPriceResult = await jupiterAggregator.getTokenPrice(tokenSymbol, baseSymbol);
+          if (jupiterPriceResult.success && jupiterPriceResult.price !== undefined) {
             priceInfo = {
-              price: jupiterPrice,
+              price: jupiterPriceResult.price,
               change24h: null,
               source: 'Jupiter (备用)',
               time: new Date().toISOString()
@@ -341,7 +341,7 @@ async function handleTokenSearch(ctx: Context, searchTerm: string): Promise<void
     // 如果不是主流代币匹配，继续使用Jupiter搜索
     let results: any[] = [];
     try {
-      results = await jupiterApi.searchToken(searchTerm);
+      results = await jupiterAggregator.searchToken(searchTerm);
     } catch (error) {
       console.error('Jupiter搜索失败:', error);
     }

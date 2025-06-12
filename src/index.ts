@@ -4,9 +4,13 @@ import dotenv from 'dotenv';
 import { message } from 'telegraf/filters';
 import { registerCommands, handleFearCommand, handleSolanaCommand } from './bot/commands';
 import { getCryptoPrice, getFearAndGreedIndex } from './services/price';
-import jupiterApi from './api/jupiterApi';
+import jupiterAggregator from './api/aggregators/jupiterAggregator';
+import HttpClient from './utils/http/httpClient';
 
 dotenv.config();
+
+// 设置HTTP客户端日志级别，减少日志输出
+HttpClient.prototype.setLogLevel('error');
 
 // 检查环境变量
 if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -16,6 +20,21 @@ if (!process.env.TELEGRAM_BOT_TOKEN) {
 
 // 创建机器人实例
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+
+// 添加Telegram API错误处理
+bot.catch((err, ctx) => {
+  const error = err as Error;
+  console.error(`Telegram API错误: ${error.message}`);
+  
+  // 处理429错误
+  if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+    const match = error.message.match(/retry after (\d+)/i);
+    if (match && match[1]) {
+      const retryAfter = parseInt(match[1], 10);
+      console.log(`收到Telegram API限流，将在${retryAfter}秒后重试`);
+    }
+  }
+});
 
 // 注册所有命令
 registerCommands(bot);
@@ -98,8 +117,100 @@ bot.on(message('text'), (ctx) => {
   ctx.reply('我不理解这个命令。请使用 /help 查看可用命令。');
 });
 
+// 定时任务管理
+const taskLocks = new Map<string, {
+  isRunning: boolean,
+  lastRun: number
+}>();
+
+/**
+ * 获取任务锁，防止重复执行
+ * @param taskId 任务ID
+ * @param cooldownMs 冷却时间(毫秒)
+ * @returns 是否可以执行任务
+ */
+function acquireTaskLock(taskId: string, cooldownMs = 60000): boolean {
+  const now = Date.now();
+  const lock = taskLocks.get(taskId) || { isRunning: false, lastRun: 0 };
+  
+  // 如果任务正在运行或者在冷却期内，不允许执行
+  if (lock.isRunning || (now - lock.lastRun < cooldownMs)) {
+    console.log(`任务 ${taskId} 已在运行或在冷却期内，跳过执行`);
+    return false;
+  }
+  
+  // 获取锁
+  lock.isRunning = true;
+  taskLocks.set(taskId, lock);
+  return true;
+}
+
+/**
+ * 释放任务锁
+ * @param taskId 任务ID
+ */
+function releaseTaskLock(taskId: string): void {
+  const lock = taskLocks.get(taskId);
+  if (lock) {
+    lock.isRunning = false;
+    lock.lastRun = Date.now();
+    taskLocks.set(taskId, lock);
+  }
+}
+
+// 跟踪最后一次消息发送时间
+let lastMessageSentTime = 0;
+const MESSAGE_COOLDOWN_MS = 5 * 60 * 1000; // 5分钟冷却时间
+
+/**
+ * 安全发送消息，带有限流保护
+ * @param chatId 聊天ID
+ * @param message 消息内容
+ * @param options 消息选项
+ * @returns 发送结果
+ */
+async function safeSendMessage(chatId: string, message: string, options?: any): Promise<boolean> {
+  try {
+    const now = Date.now();
+    
+    // 检查消息冷却期
+    if (now - lastMessageSentTime < MESSAGE_COOLDOWN_MS) {
+      console.log(`消息发送冷却中，还需等待 ${((MESSAGE_COOLDOWN_MS - (now - lastMessageSentTime)) / 1000).toFixed(1)} 秒`);
+      return false;
+    }
+    
+    await bot.telegram.sendMessage(chatId, message, options);
+    lastMessageSentTime = Date.now();
+    return true;
+  } catch (error) {
+    const err = error as Error;
+    console.error(`发送消息失败: ${err.message}`);
+    
+    // 处理429错误
+    if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+      const match = err.message.match(/retry after (\d+)/i);
+      if (match && match[1]) {
+        const retryAfter = parseInt(match[1], 10) * 1000;
+        console.log(`收到Telegram API限流，将在${retryAfter/1000}秒后重试`);
+        
+        // 更新冷却时间
+        lastMessageSentTime = Date.now() - MESSAGE_COOLDOWN_MS + retryAfter;
+      }
+    }
+    
+    return false;
+  }
+}
+
 // 设置定时任务 - 每天19:00发送恐惧贪婪指数
 cron.schedule('0 19 * * *', async () => {
+  const taskId = 'daily-fear-greed-report';
+  
+  // 获取任务锁
+  if (!acquireTaskLock(taskId, 12 * 60 * 60 * 1000)) { // 12小时冷却
+    return;
+  }
+  
   try {
     const channelId = process.env.TELEGRAM_CHAT_ID;
     if (!channelId) {
@@ -139,21 +250,27 @@ SOL: $${solData.market_data.current_price.usd.toFixed(2)} (${solData.market_data
       console.error('获取价格数据失败', error);
     }
     
-    await bot.telegram.sendMessage(channelId, message, { parse_mode: 'Markdown' });
-    console.log('定时发送市场情绪报告成功');
+    // 安全发送消息
+    const sent = await safeSendMessage(channelId, message, { parse_mode: 'Markdown' });
+    if (sent) {
+      console.log('定时发送市场情绪报告成功');
+    }
   } catch (error) {
     console.error('定时任务执行失败:', error);
+  } finally {
+    // 释放任务锁
+    releaseTaskLock(taskId);
   }
 });
 
 async function fetchPrice() {
-  // 使用Jupiter API获取SOL/USDC价格
+  // 获取SOL和WIF价格
   try {
-    const solPrice = await jupiterApi.getTokenPrice('SOL', 'USDC');
-    console.log('SOL/USDC 价格:', solPrice);
+    const solPrice = await jupiterAggregator.getTokenPrice('SOL', 'USDC');
+    console.log('SOL价格:', solPrice);
     
-    const wifPrice = await jupiterApi.getTokenPrice('WIF', 'USDC');
-    console.log('WIF/USDC 价格:', wifPrice);
+    const wifPrice = await jupiterAggregator.getTokenPrice('WIF', 'USDC');
+    console.log('WIF价格:', wifPrice);
   } catch (error) {
     console.error('获取价格失败:', error);
   }

@@ -2,9 +2,12 @@ import axios from 'axios';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { config } from '../../config';
 
+/**
+ * Solana区块链接口实现
+ */
 class SolanaAPI {
-  private connection: Connection;
-  private solscanApiKey: string;
+  public connection: Connection;
+  public solscanApiKey: string;
 
   constructor() {
     this.connection = new Connection(config.SOLANA_RPC_URL);

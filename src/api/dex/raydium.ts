@@ -4,17 +4,19 @@ import { resolveToken } from '../../services/tokenResolver';
 import { getTokenBySymbol } from '../../config/tokens';
 import { getCexTokenPrice } from '../../services/price';
 import { Connection, clusterApiUrl } from '@solana/web3.js';
+import { ExchangeType, IDexApi, BlockchainType, PriceResult } from '../interfaces/exchangeApi';
+import { API_CONFIG } from '../../config/env';
 
 /**
  * Raydium DEX API接口
  */
-export class RaydiumAPI {
-  private apiUrl: string;
-  private solanaConnection: Connection;
-  private tokenAddressCache: Map<string, string> = new Map(); // 添加缓存
+export class RaydiumAPI implements IDexApi {
+  public apiUrl: string;
+  public solanaConnection: Connection;
+  public tokenAddressCache: Map<string, string> = new Map(); // 添加缓存
   
   constructor() {
-    this.apiUrl = config.RAYDIUM_API_URL;
+    this.apiUrl = API_CONFIG.RAYDIUM_API || 'https://api.raydium.io/v2/main/pairs';
     this.solanaConnection = new Connection(clusterApiUrl('mainnet-beta'));
     // 确保API URL是有效的，如果配置有问题则使用默认URL
     if (!this.apiUrl || this.apiUrl.endsWith('/v2')) {
@@ -31,12 +33,33 @@ export class RaydiumAPI {
   }
   
   /**
+   * 获取交易所名称
+   */
+  public getName(): string {
+    return 'raydium';
+  }
+  
+  /**
+   * 获取交易所类型
+   */
+  public getType(): ExchangeType {
+    return ExchangeType.DEX;
+  }
+  
+  /**
+   * 获取区块链类型
+   */
+  public getBlockchain(): BlockchainType {
+    return BlockchainType.SOLANA;
+  }
+  
+  /**
    * 获取代币价格
    * @param tokenSymbol 代币符号
    * @param baseTokenSymbol 基础代币符号
    * @returns 代币价格
    */
-  async getTokenPrice(tokenSymbol: string, baseTokenSymbol: string): Promise<string | null> {
+  async getTokenPrice(tokenSymbol: string, baseTokenSymbol: string): Promise<PriceResult> {
     try {
       console.log(`[Raydium] 正在查询 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
       
@@ -50,7 +73,14 @@ export class RaydiumAPI {
       try {
         const jupiterPrice = await this.getJupiterPrice(normalizedTokenSymbol, normalizedBaseSymbol);
         if (jupiterPrice) {
-          return jupiterPrice.toString();
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: true,
+            price: jupiterPrice,
+            timestamp: Date.now()
+          };
         }
       } catch (jupiterError) {
         console.log(`[Raydium] Jupiter API获取价格失败: ${(jupiterError as Error).message}`);
@@ -66,20 +96,44 @@ export class RaydiumAPI {
         const baseToken = await resolveToken(actualBaseTokenSymbol);
         
         if (!token) {
-          throw new Error(`未找到代币: ${actualTokenSymbol}`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `未找到代币: ${actualTokenSymbol}`
+          };
         }
         
         if (!baseToken) {
-          throw new Error(`未找到基础代币: ${actualBaseTokenSymbol}`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `未找到基础代币: ${actualBaseTokenSymbol}`
+          };
         }
         
         // 确保地址存在
         if (!token.address) {
-          throw new Error(`代币 ${actualTokenSymbol} 没有有效的地址`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `代币 ${actualTokenSymbol} 没有有效的地址`
+          };
         }
         
         if (!baseToken.address) {
-          throw new Error(`基础代币 ${actualBaseTokenSymbol} 没有有效的地址`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `基础代币 ${actualBaseTokenSymbol} 没有有效的地址`
+          };
         }
         
         console.log(`[Raydium] 代币信息: ${token.symbol} (${token.name}) - ${token.address}`);
@@ -92,35 +146,87 @@ export class RaydiumAPI {
           const pair = this.findPair(pairs, token.address, baseToken.address);
           
           if (pair) {
-            return pair.price;
+            return {
+              exchange: this.getName(),
+              exchangeType: this.getType(),
+              blockchain: this.getBlockchain(),
+              success: true,
+              price: parseFloat(pair.price),
+              timestamp: Date.now()
+            };
           }
           
           // 如果在Raydium上没找到交易对，尝试从Solana公共API获取价格
           const solanaPrice = await this.getSolanaTokenPrice(token.address, baseToken.address);
           if (solanaPrice) {
-            return solanaPrice.toString();
+            return {
+              exchange: this.getName(),
+              exchangeType: this.getType(),
+              blockchain: this.getBlockchain(),
+              success: true,
+              price: solanaPrice,
+              timestamp: Date.now()
+            };
           }
-          throw new Error(`Raydium上未找到交易对: ${actualTokenSymbol}/${actualBaseTokenSymbol}`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `Raydium上未找到交易对: ${actualTokenSymbol}/${actualBaseTokenSymbol}`
+          };
         } catch (error) {
           console.error(`[Raydium] 获取代币价格失败:`, error);
-          throw new Error(`获取Raydium代币价格失败: ${(error as Error).message}`);
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: false,
+            error: `获取Raydium代币价格失败: ${(error as Error).message}`
+          };
         }
       } catch (error) {
         console.error(`[Raydium] 获取价格失败:`, error);
-        throw error;
+        return {
+          exchange: this.getName(),
+          exchangeType: this.getType(),
+          blockchain: this.getBlockchain(),
+          success: false,
+          error: (error as Error).message
+        };
       }
     } catch (error) {
       console.error(`[Raydium] 获取价格失败:`, error);
-      throw error;
+      return {
+        exchange: this.getName(),
+        exchangeType: this.getType(),
+        blockchain: this.getBlockchain(),
+        success: false,
+        error: (error as Error).message
+      };
     }
   }
   
   /**
-   * 规范化代币符号，处理SOL/WSOL转换
-   * @param symbol 原始代币符号
+   * 检查代币是否支持
+   * @param tokenSymbol 代币符号
+   * @returns 是否支持
+   */
+  public async isTokenSupported(tokenSymbol: string): Promise<boolean> {
+    try {
+      const token = await resolveToken(tokenSymbol);
+      return token !== null;
+    } catch (error) {
+      return false;
+    }
+  }
+  
+  /**
+   * 规范化代币符号
+   * @param symbol 代币符号
    * @returns 规范化后的代币符号
    */
-  private normalizeTokenSymbol(symbol: string): string {
+  public normalizeTokenSymbol(symbol: string): string {
     const upperSymbol = symbol.toUpperCase();
     
     // SOL在Solana链上使用WSOL
@@ -133,9 +239,12 @@ export class RaydiumAPI {
   }
   
   /**
-   * 直接从Jupiter API获取价格
+   * 从Jupiter API获取价格
+   * @param tokenSymbol 代币符号
+   * @param baseTokenSymbol 基础代币符号
+   * @returns 价格
    */
-  private async getJupiterPrice(tokenSymbol: string, baseTokenSymbol: string): Promise<number | null> {
+  public async getJupiterPrice(tokenSymbol: string, baseTokenSymbol: string): Promise<number | null> {
     try {
       // 处理SOL/WSOL转换
       const normalizedTokenSymbol = this.normalizeTokenSymbol(tokenSymbol);
@@ -150,18 +259,17 @@ export class RaydiumAPI {
         return null;
       }
       
-      console.log(`[Raydium] 代币地址: ${tokenAddress}`);
-      console.log(`[Raydium] 基础代币地址: ${baseTokenAddress}`);
+      console.log(`[Raydium] 代币地址: ${normalizedTokenSymbol}=${tokenAddress}, ${normalizedBaseSymbol}=${baseTokenAddress}`);
       
       // 使用Jupiter Price API
-      const jupiterPriceUrl = `${config.JUPITER_API_URL}/price?inputMint=${tokenAddress}&outputMint=${baseTokenAddress}&amount=1000000000&slippage=0.5`;
+      const jupiterPriceUrl = `${API_CONFIG.JUPITER_PRICE_API}?ids=${tokenAddress}&vsToken=${baseTokenAddress}`;
       console.log(`[Raydium] Jupiter Price API URL: ${jupiterPriceUrl}`);
       
       const response = await axios.get(jupiterPriceUrl);
       
-      if (response.data && response.data.data && response.data.data.price) {
-        console.log(`[Raydium] Jupiter Price API 返回价格: ${response.data.data.price}`);
-        return parseFloat(response.data.data.price);
+      if (response.data && response.data.data && response.data.data[tokenAddress]) {
+        console.log(`[Raydium] Jupiter Price API 返回价格: ${response.data.data[tokenAddress].price}`);
+        return parseFloat(response.data.data[tokenAddress].price);
       } else if (response.data && response.data.price) {
         console.log(`[Raydium] Jupiter Price API 返回价格: ${response.data.price}`);
         return parseFloat(response.data.price);
@@ -176,34 +284,26 @@ export class RaydiumAPI {
   }
   
   /**
-   * 从Jupiter API获取Solana代币价格
+   * 从Solana获取代币价格
+   * @param tokenSymbol 代币符号
+   * @param baseTokenSymbol 基础代币符号
+   * @returns 价格
    */
-  private async getSolanaTokenPrice(tokenSymbol: string, baseTokenSymbol: string): Promise<number | null> {
+  public async getSolanaTokenPrice(tokenAddress: string, baseTokenAddress: string): Promise<number | null> {
     try {
-      // 处理SOL/WSOL转换
-      const normalizedTokenSymbol = this.normalizeTokenSymbol(tokenSymbol);
-      const normalizedBaseSymbol = this.normalizeTokenSymbol(baseTokenSymbol);
-      
-      // 获取代币地址
-      const tokenAddress = await this.getTokenAddress(normalizedTokenSymbol);
-      const baseTokenAddress = await this.getTokenAddress(normalizedBaseSymbol);
-      
       if (!tokenAddress || !baseTokenAddress) {
-        console.log(`[Raydium] 未找到代币地址: ${normalizedTokenSymbol} 或 ${normalizedBaseSymbol}`);
+        console.log(`[Raydium] 未找到代币地址`);
         return null;
       }
       
-      console.log(`[Raydium] 代币地址: ${tokenAddress}`);
-      console.log(`[Raydium] 基础代币地址: ${baseTokenAddress}`);
-      
       // 使用更可靠的Jupiter聚合器API
-      const jupiterPriceUrl = `${config.JUPITER_API_URL}/price?inputMint=${tokenAddress}&outputMint=${baseTokenAddress}&amount=1000000000&slippage=0.5`;
+      const jupiterPriceUrl = `${API_CONFIG.JUPITER_PRICE_API}?ids=${tokenAddress}&vsToken=${baseTokenAddress}`;
       console.log(`[Raydium] Jupiter API URL: ${jupiterPriceUrl}`);
       
       const response = await axios.get(jupiterPriceUrl);
       
-      if (response.data && response.data.data && response.data.data.price) {
-        return parseFloat(response.data.data.price);
+      if (response.data && response.data.data && response.data.data[tokenAddress]) {
+        return parseFloat(response.data.data[tokenAddress].price);
       } else if (response.data && response.data.price) {
         return parseFloat(response.data.price);
       }
@@ -335,141 +435,52 @@ export class RaydiumAPI {
   /**
    * 获取代币地址
    * @param symbol 代币符号
-   * @returns 代币地址
+   * @returns 代币地址或null
    */
-  private async getTokenAddress(symbol: string): Promise<string | null> {
-    // 规范化代币符号，处理SOL/WSOL转换
-    const normalizedSymbol = this.normalizeTokenSymbol(symbol);
-    const upperSymbol = normalizedSymbol.toUpperCase();
-    
-    // 检查缓存
-    if (this.tokenAddressCache.has(upperSymbol)) {
-      const cachedAddress = this.tokenAddressCache.get(upperSymbol);
-      console.log(`[Raydium] 从缓存获取地址: ${upperSymbol} -> ${cachedAddress}`);
-      return cachedAddress as string;
-    }
-    
-    // 1. 首先检查常用代币的缓存
-    const commonTokens: Record<string, string> = {
-      'SOL': 'So11111111111111111111111111111111111111112', // 原生SOL
-      'WSOL': 'So11111111111111111111111111111111111111112', // 包装SOL
-      'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC (Solana)
-      'USDT': 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT (Solana)
-    };
-    
-    if (commonTokens[upperSymbol]) {
-      const address = commonTokens[upperSymbol];
-      console.log(`[Raydium] 从常用代币列表获取地址: ${upperSymbol} -> ${address}`);
-      // 添加到缓存
-      this.tokenAddressCache.set(upperSymbol, address);
-      return address;
-    }
-    
-    // 2. 如果是native，返回SOL地址
-    if (upperSymbol === 'NATIVE') {
-      const address = commonTokens['SOL'];
-      this.tokenAddressCache.set(upperSymbol, address);
-      return address;
-    }
-    
+  public async getTokenAddress(symbol: string): Promise<string | null> {
     try {
-      let foundAddress: string | null = null;
+      // 首先检查缓存
+      const cachedAddress = this.tokenAddressCache.get(symbol.toUpperCase());
+      if (cachedAddress) {
+        console.log(`[Raydium] 使用缓存的代币地址: ${symbol} -> ${cachedAddress}`);
+        return cachedAddress;
+      }
       
-      // 3. 尝试从Solana代币列表获取
-      if (!foundAddress) {
-        console.log(`[Raydium] 尝试从Solana代币列表获取 ${symbol} 地址...`);
-        try {
-          const response = await axios.get(config.SOLANA_TOKEN_LIST_URL);
+      // 尝试从token resolver获取
+      const token = await resolveToken(symbol);
+      if (token && token.address) {
+        // 缓存结果
+        this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
+        return token.address;
+      }
+      
+      // 如果是SOL，返回WSOL地址
+      if (symbol.toUpperCase() === 'SOL' || symbol.toUpperCase() === 'WSOL') {
+        const wsolAddress = 'So11111111111111111111111111111111111111112'; // WSOL地址
+        this.tokenAddressCache.set('SOL', wsolAddress);
+        this.tokenAddressCache.set('WSOL', wsolAddress);
+        return wsolAddress;
+      }
+      
+      // 尝试从Jupiter API获取
+      try {
+        const response = await axios.get(API_CONFIG.JUPITER_TOKEN_LIST_API);
+        if (response.data && Array.isArray(response.data)) {
+          const token = response.data.find((t: any) => 
+            t.symbol && t.symbol.toUpperCase() === symbol.toUpperCase() ||
+            t.name && t.name.toUpperCase() === symbol.toUpperCase()
+          );
           
-          if (response.data && response.data.tokens) {
-            const token = response.data.tokens.find((t: any) => 
-              t.symbol.toUpperCase() === upperSymbol || 
-              t.name.toUpperCase().includes(upperSymbol)
-            );
-            
-            if (token) {
-              console.log(`[Raydium] 从Solana代币列表找到: ${token.symbol} (${token.name}) -> ${token.address}`);
-              foundAddress = token.address;
-            }
+          if (token && token.address) {
+            // 缓存结果
+            this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
+            return token.address;
           }
-        } catch (error) {
-          console.error(`[Raydium] 从Solana代币列表获取地址失败:`, error);
         }
+      } catch (error) {
+        console.error(`[Raydium] 从Jupiter获取代币地址失败:`, error);
       }
       
-      // 4. 尝试从Jupiter API获取
-      if (!foundAddress) {
-        console.log(`[Raydium] 尝试从Jupiter API获取 ${symbol} 地址...`);
-        try {
-          const jupiterResponse = await axios.get(config.JUPITER_TOKEN_LIST_URL);
-          
-          if (jupiterResponse.data) {
-            const jupToken = jupiterResponse.data.find((t: any) => 
-              t.symbol.toUpperCase() === upperSymbol || 
-              t.name.toUpperCase().includes(upperSymbol)
-            );
-            
-            if (jupToken) {
-              console.log(`[Raydium] 从Jupiter API找到: ${jupToken.symbol} (${jupToken.name}) -> ${jupToken.address}`);
-              foundAddress = jupToken.address;
-            }
-          }
-        } catch (error) {
-          console.error(`[Raydium] 从Jupiter API获取地址失败:`, error);
-        }
-      }
-      
-      // 5. 尝试使用CoinGecko获取代币信息
-      if (!foundAddress) {
-        console.log(`[Raydium] 尝试从CoinGecko获取 ${symbol} 信息...`);
-        try {
-          const searchUrl = `${config.COINGECKO_API_URL}/search?query=${symbol}`;
-          const searchResponse = await axios.get(searchUrl);
-          
-          if (searchResponse.data && searchResponse.data.coins && searchResponse.data.coins.length > 0) {
-            // 尝试找到最匹配的代币
-            const exactSymbolMatch = searchResponse.data.coins.find(
-              (coin: any) => coin.symbol.toLowerCase() === symbol.toLowerCase()
-            );
-            
-            const bestMatch = exactSymbolMatch || searchResponse.data.coins[0];
-            console.log(`[Raydium] 从CoinGecko找到: ${bestMatch.symbol} (${bestMatch.name})`);
-            
-            // 由于CoinGecko不直接提供Solana地址，我们需要使用代币符号再次查询Solana代币列表
-            if (bestMatch.symbol) {
-              const symbolToSearch = bestMatch.symbol.toUpperCase();
-              
-              try {
-                // 重新查询Solana代币列表
-                const response = await axios.get(config.SOLANA_TOKEN_LIST_URL);
-                
-                if (response.data && response.data.tokens) {
-                  const tokenBySymbol = response.data.tokens.find((t: any) => 
-                    t.symbol.toUpperCase() === symbolToSearch
-                  );
-                  
-                  if (tokenBySymbol) {
-                    console.log(`[Raydium] 通过CoinGecko符号在Solana列表找到: ${tokenBySymbol.address}`);
-                    foundAddress = tokenBySymbol.address;
-                  }
-                }
-              } catch (error) {
-                console.error(`[Raydium] 通过CoinGecko符号查询Solana列表失败:`, error);
-              }
-            }
-          }
-        } catch (error) {
-          console.error(`[Raydium] 从CoinGecko获取信息失败:`, error);
-        }
-      }
-      
-      // 如果找到了地址，添加到缓存
-      if (foundAddress) {
-        this.tokenAddressCache.set(upperSymbol, foundAddress);
-        return foundAddress;
-      }
-      
-      console.log(`[Raydium] 未找到代币地址: ${symbol}`);
       return null;
     } catch (error) {
       console.error(`[Raydium] 获取代币地址失败:`, error);
@@ -478,9 +489,10 @@ export class RaydiumAPI {
   }
   
   /**
-   * 获取Raydium交易对列表
+   * 获取交易对
+   * @returns 交易对数组
    */
-  private async getPairs(): Promise<any[]> {
+  public async getPairs(): Promise<any[]> {
     try {
       // 确保API URL是否配置
       if (!this.apiUrl) {
@@ -513,9 +525,13 @@ export class RaydiumAPI {
   }
   
   /**
-   * 查找匹配的交易对
+   * 查找交易对
+   * @param pairs 交易对数组
+   * @param tokenAddress 代币地址
+   * @param baseTokenAddress 基础代币地址
+   * @returns 交易对
    */
-  private findPair(pairs: any[], tokenAddress: string, baseTokenAddress: string): any | null {
+  public findPair(pairs: any[], tokenAddress: string, baseTokenAddress: string): any | null {
     // 查找匹配的交易对
     const pair = pairs.find((p: any) => 
       (p.baseMint === tokenAddress && p.quoteMint === baseTokenAddress) || 

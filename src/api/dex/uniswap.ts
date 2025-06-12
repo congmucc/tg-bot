@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { config } from '../../config';
 import axios from 'axios';
 import { getTokenBySymbol } from '../../config/tokens';
+import { ExchangeType, IDexApi, BlockchainType, PriceResult } from '../interfaces/exchangeApi';
 
 // Uniswap V3 Factory ABI (简化版)
 const FACTORY_ABI = [
@@ -25,18 +26,39 @@ const ERC20_ABI = [
 /**
  * Uniswap API接口
  */
-class UniswapAPI {
-  private provider: ethers.providers.JsonRpcProvider;
-  private factoryAddress: string;
-  private factoryContract: ethers.Contract;
-  private graphUrl: string;
-  private commonPoolFees: number[] = [500, 3000, 10000]; // Uniswap V3 常见费率: 0.05%, 0.3%, 1%
+class UniswapAPI implements IDexApi {
+  public provider: ethers.providers.JsonRpcProvider;
+  public factoryAddress: string;
+  public factoryContract: ethers.Contract;
+  public graphUrl: string;
+  public commonPoolFees: number[] = [500, 3000, 10000]; // Uniswap V3 常见费率: 0.05%, 0.3%, 1%
 
   constructor() {
     this.provider = new ethers.providers.JsonRpcProvider(config.ETHEREUM_RPC_URL);
     this.factoryAddress = '0x1F98431c8aD98523631AE4a59f267346ea31F984'; // Uniswap V3 工厂合约
     this.factoryContract = new ethers.Contract(this.factoryAddress, FACTORY_ABI, this.provider);
     this.graphUrl = config.UNISWAP_GRAPH_URL;
+  }
+
+  /**
+   * 获取交易所名称
+   */
+  public getName(): string {
+    return 'uniswap';
+  }
+  
+  /**
+   * 获取交易所类型
+   */
+  public getType(): ExchangeType {
+    return ExchangeType.DEX;
+  }
+  
+  /**
+   * 获取区块链类型
+   */
+  public getBlockchain(): BlockchainType {
+    return BlockchainType.ETHEREUM;
   }
 
   /**
@@ -82,7 +104,7 @@ class UniswapAPI {
    * @param tokenSymbol 代币符号
    * @param baseTokenSymbol 基础代币符号（如USDT）
    */
-  async getTokenPrice(tokenSymbol: string, baseTokenSymbol = 'USDT'): Promise<string> {
+  async getTokenPrice(tokenSymbol: string, baseTokenSymbol = 'USDT'): Promise<PriceResult> {
     try {
       // 处理ETH特殊情况 - 使用WETH
       let actualTokenSymbol = tokenSymbol;
@@ -91,12 +113,47 @@ class UniswapAPI {
         console.log('[Uniswap] 使用WETH代替ETH');
       }
       
+      // 对于SOL，在以太坊上可能没有直接的交易对
+      if (tokenSymbol.toUpperCase() === 'SOL' && baseTokenSymbol.toUpperCase() === 'USDC') {
+        console.log('[Uniswap] SOL在以太坊上可能没有直接的USDC交易对，尝试通过第三方API获取');
+        
+        // 尝试通过CoinGecko获取SOL价格
+        try {
+          console.log('[Uniswap] 尝试从CoinGecko获取SOL/USDC价格...');
+          const geckoResponse = await axios.get(
+            'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
+            { timeout: 10000 }
+          );
+          
+          if (geckoResponse.data && geckoResponse.data.solana && geckoResponse.data.solana.usd) {
+            const price = geckoResponse.data.solana.usd;
+            console.log(`[Uniswap] 从CoinGecko获取的SOL价格: ${price}`);
+            return {
+              exchange: this.getName(),
+              exchangeType: this.getType(),
+              blockchain: this.getBlockchain(),
+              success: true,
+              price: price,
+              timestamp: Date.now()
+            };
+          }
+        } catch (geckoError) {
+          console.error('[Uniswap] CoinGecko API获取SOL价格失败:', geckoError);
+        }
+      }
+      
       // 获取代币信息
       const token = getTokenBySymbol(actualTokenSymbol, 'ethereum');
       const baseToken = getTokenBySymbol(baseTokenSymbol, 'ethereum');
       
       if (!token || !baseToken) {
-        throw new Error(`代币信息不存在: ${!token ? actualTokenSymbol : baseTokenSymbol}`);
+        return {
+          exchange: this.getName(),
+          exchangeType: this.getType(),
+          blockchain: this.getBlockchain(),
+          success: false,
+          error: `代币信息不存在: ${!token ? actualTokenSymbol : baseTokenSymbol}`
+        };
       }
 
       // 直接尝试使用可靠的第三方API获取价格
@@ -104,16 +161,23 @@ class UniswapAPI {
         // 尝试通过CoinGecko获取
         console.log(`[Uniswap] 尝试从CoinGecko获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
         const geckoResponse = await axios.get(
-          `https://api.coingecko.com/api/v3/simple/price?ids=${tokenSymbol.toLowerCase()}&vs_currencies=${baseTokenSymbol.toLowerCase()}`,
+          `https://api.coingecko.com/api/v3/simple/price?ids=${tokenSymbol.toLowerCase()}&vs_currencies=usd`,
           { timeout: 10000 }
         );
         
         if (geckoResponse.data && 
             geckoResponse.data[tokenSymbol.toLowerCase()] && 
-            geckoResponse.data[tokenSymbol.toLowerCase()][baseTokenSymbol.toLowerCase()]) {
-          const price = geckoResponse.data[tokenSymbol.toLowerCase()][baseTokenSymbol.toLowerCase()];
+            geckoResponse.data[tokenSymbol.toLowerCase()].usd) {
+          const price = geckoResponse.data[tokenSymbol.toLowerCase()].usd;
           console.log(`[Uniswap] 从CoinGecko获取的价格: ${price}`);
-          return price.toString();
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: true,
+            price: price,
+            timestamp: Date.now()
+          };
         }
       } catch (geckoError) {
         console.error('[Uniswap] CoinGecko API失败:', geckoError);
@@ -122,15 +186,30 @@ class UniswapAPI {
       // 尝试通过Binance获取
       try {
         console.log(`[Uniswap] 尝试从Binance获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
+        
+        // 如果是USDC交易对，尝试使用USDT
+        let binanceSymbol = `${tokenSymbol}${baseTokenSymbol}`;
+        if (baseTokenSymbol.toUpperCase() === 'USDC') {
+          binanceSymbol = `${tokenSymbol}USDT`;
+          console.log(`[Uniswap] USDC交易对可能不存在，尝试使用USDT交易对: ${binanceSymbol}`);
+        }
+        
         const binanceResponse = await axios.get(
-          `https://api.binance.com/api/v3/ticker/price?symbol=${tokenSymbol}${baseTokenSymbol}`,
+          `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
           { timeout: 10000 }
         );
         
         if (binanceResponse.data && binanceResponse.data.price) {
           const price = binanceResponse.data.price;
           console.log(`[Uniswap] 从Binance获取的价格: ${price}`);
-          return price;
+          return {
+            exchange: this.getName(),
+            exchangeType: this.getType(),
+            blockchain: this.getBlockchain(),
+            success: true,
+            price: parseFloat(price),
+            timestamp: Date.now()
+          };
         }
       } catch (binanceError) {
         console.error('[Uniswap] Binance API失败:', binanceError);
@@ -199,63 +278,38 @@ class UniswapAPI {
       
       console.log(`[Uniswap] ${actualTokenSymbol}/${baseTokenSymbol} 最终价格: ${finalPrice}`);
       
-      // 根据代币信息做最终的理智检查
-      interface PriceRange {
-        min: number;
-        max: number;
-      }
-      
-      const knownRanges: Record<string, PriceRange> = {
-        'WETH': { min: 1000, max: 5000 }, // WETH价格范围
-        'WBTC': { min: 20000, max: 100000 }, // WBTC价格范围
-        'USDC': { min: 0.9, max: 1.1 },  // USDC稳定币范围
-        'USDT': { min: 0.9, max: 1.1 }   // USDT稳定币范围
+      return {
+        exchange: this.getName(),
+        exchangeType: this.getType(),
+        blockchain: this.getBlockchain(),
+        success: true,
+        price: finalPrice,
+        timestamp: Date.now()
       };
       
-      // 如果交易对包含已知代币，检查价格是否在合理范围内
-      const knownToken = knownRanges[actualTokenSymbol];
-      const knownBase = knownRanges[baseTokenSymbol];
-      
-      // 通过已知的代币范围验证价格合理性
-      if (knownToken && baseTokenSymbol === 'USDT') {
-        if (finalPrice < knownToken.min || finalPrice > knownToken.max) {
-          console.log(`[Uniswap] 警告: ${actualTokenSymbol} 价格 ${finalPrice} 超出已知范围 ${knownToken.min}-${knownToken.max}`);
-          throw new Error('价格超出合理范围');
-        }
-      } else if (knownBase && actualTokenSymbol === 'USDT') {
-        const inversePrice = 1 / finalPrice;
-        if (inversePrice < knownBase.min || inversePrice > knownBase.max) {
-          console.log(`[Uniswap] 警告: ${baseTokenSymbol} 价格 ${inversePrice} 超出已知范围 ${knownBase.min}-${knownBase.max}`);
-          throw new Error('价格超出合理范围');
-        }
-      }
-      
-      return finalPrice.toString();
     } catch (error) {
-      const err = error as Error;
-      console.error(`[Uniswap] 获取代币价格失败:`, err);
-      
-      // 使用OKX作为最后的备用选项
-      try {
-        console.log(`[Uniswap] 尝试从OKX获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
-        const response = await axios.get(
-          `https://www.okx.com/api/v5/market/ticker?instId=${tokenSymbol}-${baseTokenSymbol}`,
-          { timeout: 10000 }
-        );
-        
-        if (response.data && 
-            response.data.data && 
-            response.data.data.length > 0 && 
-            response.data.data[0].last) {
-          const price = response.data.data[0].last;
-          console.log(`[Uniswap] 从OKX获取的价格: ${price}`);
-          return price;
-        }
-      } catch (okxError) {
-        console.error(`[Uniswap] OKX获取失败:`, okxError);
-      }
-      
-      throw new Error(`获取Uniswap代币价格失败: ${err.message}`);
+      console.error('[Uniswap] 获取价格失败:', error);
+      return {
+        exchange: this.getName(),
+        exchangeType: this.getType(),
+        blockchain: this.getBlockchain(),
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+  
+  /**
+   * 检查代币是否支持
+   * @param tokenSymbol 代币符号
+   * @returns 是否支持
+   */
+  public async isTokenSupported(tokenSymbol: string): Promise<boolean> {
+    try {
+      const token = getTokenBySymbol(tokenSymbol, 'ethereum');
+      return token !== null;
+    } catch (error) {
+      return false;
     }
   }
 

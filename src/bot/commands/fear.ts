@@ -1,5 +1,5 @@
 import { Context } from 'telegraf';
-import { getFearAndGreedIndex } from '../../api';
+import { getFearAndGreedIndex } from '../../utils/crypto/cryptoUtils';
 
 /**
  * 处理恐惧贪婪指数查询命令
