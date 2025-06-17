@@ -444,47 +444,47 @@ export class RaydiumAPI implements IDexApi {
       if (cachedAddress) {
         console.log(`[Raydium] 使用缓存的代币地址: ${symbol} -> ${cachedAddress}`);
         return cachedAddress;
-      }
-      
+    }
+    
       // 尝试从token resolver获取
       const token = await resolveToken(symbol);
       if (token && token.address) {
         // 缓存结果
         this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
         return token.address;
-      }
-      
+    }
+    
       // 如果是SOL，返回WSOL地址
       if (symbol.toUpperCase() === 'SOL' || symbol.toUpperCase() === 'WSOL') {
         const wsolAddress = 'So11111111111111111111111111111111111111112'; // WSOL地址
         this.tokenAddressCache.set('SOL', wsolAddress);
         this.tokenAddressCache.set('WSOL', wsolAddress);
         return wsolAddress;
-      }
-      
+    }
+    
       // 尝试从Jupiter API获取
-      try {
+    try {
         const response = await axios.get(API_CONFIG.JUPITER_TOKEN_LIST_API);
         if (response.data && Array.isArray(response.data)) {
-          const token = response.data.find((t: any) => 
+        const token = response.data.find((t: any) => 
             t.symbol && t.symbol.toUpperCase() === symbol.toUpperCase() ||
             t.name && t.name.toUpperCase() === symbol.toUpperCase()
-          );
-          
-          if (token && token.address) {
+        );
+        
+        if (token && token.address) {
             // 缓存结果
             this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
-            return token.address;
-          }
+          return token.address;
         }
-      } catch (error) {
-        console.error(`[Raydium] 从Jupiter获取代币地址失败:`, error);
       }
-      
+    } catch (error) {
+        console.error(`[Raydium] 从Jupiter获取代币地址失败:`, error);
+    }
+    
       return null;
     } catch (error) {
       console.error(`[Raydium] 获取代币地址失败:`, error);
-      return null;
+    return null;
     }
   }
   

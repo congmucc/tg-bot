@@ -84,7 +84,7 @@ class KrakenApi implements ICexApi {
       const pair = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
       
       // 调用Kraken API获取价格
-      const response = await this.http.get('/0/public/Ticker', { pair });
+      const response = await this.http.get('/0/public/Ticker', { pair: pair });
       
       if (response.status === 200 && response.data && response.data.result && response.data.result[pair]) {
         // Kraken API返回的结构中c[0]是最新价格
@@ -149,7 +149,7 @@ class KrakenApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const pair = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/0/public/Ticker', { pair });
+          const response = await this.http.get('/0/public/Ticker', { pair: pair });
           if (response.status === 200 && response.data && response.data.result && 
               (response.data.result[pair] || response.data.result[`${tokenSymbol.toUpperCase()}${baseToken.toUpperCase()}`])) {
             return true;

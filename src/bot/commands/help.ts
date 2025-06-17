@@ -27,7 +27,6 @@ export async function handleHelpCommand(ctx: Context): Promise<void> {
 💰 *跨链与交易分析*
 ---------------------
 /liquidity [池ID/代币对] [链] - 分析流动性池
-/solana - 查看Solana网络状态
 
 🔔 *提醒与监控*
 ---------------------

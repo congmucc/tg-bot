@@ -63,7 +63,7 @@ export async function getPriceFromCexes(
           exchange: api.getName(),
           success: false,
           error: error.message
-        });
+          });
       })
   );
   

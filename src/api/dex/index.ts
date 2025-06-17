@@ -65,9 +65,9 @@ export async function getPriceAcrossDexes(
   
   // 遍历所有DEX API并获取价格
   for (const [dexName, dexApi] of Object.entries(dexApis)) {
-    promises.push(
-      (async () => {
-        try {
+  promises.push(
+    (async () => {
+      try {
           console.log(`尝试从${dexApi.getName()}获取 ${normalizedTokenSymbol}/${normalizedBaseTokenSymbol} 价格...`);
           const priceResult = await dexApi.getTokenPrice(normalizedTokenSymbol, normalizedBaseTokenSymbol);
           
@@ -86,9 +86,9 @@ export async function getPriceAcrossDexes(
               success: false,
               error: priceResult.error || '未找到价格'
             });
-          }
-        } catch (error) {
-          const err = error as Error;
+        }
+      } catch (error) {
+        const err = error as Error;
           console.error(`[${dexApi.getName()}] 获取价格失败:`, err.message);
           results.push({
             dex: dexApi.getName(),
@@ -96,9 +96,9 @@ export async function getPriceAcrossDexes(
             success: false,
             error: err.message
           });
-        }
-      })()
-    );
+      }
+    })()
+  );
   }
   
   // 等待所有价格查询完成
@@ -115,8 +115,8 @@ class DexApiManager {
    * 获取DEX API
    */
   public getDexApi = getDexApi;
-  
-  /**
+
+/**
    * 检查代币是否支持
    */
   public isTokenSupported = isTokenSupported;
@@ -125,8 +125,8 @@ class DexApiManager {
    * 获取不同DEX上的价格
    */
   public getPriceAcrossDexes = getPriceAcrossDexes;
-  
-  /**
+
+/**
    * 获取所有DEX API
    */
   public get apis() {
@@ -135,7 +135,7 @@ class DexApiManager {
       raydium: raydiumAPI,
       '1inch': oneInchApi
     };
-  }
+    }
 }
 
 // 创建并导出实例

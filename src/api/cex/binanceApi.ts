@@ -81,7 +81,7 @@ class BinanceApi implements ICexApi {
       const symbol = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
       
       // 调用Binance API获取价格
-      const response = await this.http.get('/api/v3/ticker/price', { symbol });
+      const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
       
       if (response.status === 200 && response.data && response.data.price) {
         const price = parseFloat(response.data.price);
@@ -151,7 +151,7 @@ class BinanceApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const symbol = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/api/v3/ticker/price', { symbol });
+          const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
           if (response.status === 200 && response.data && response.data.price) {
             return true;
           }
@@ -176,7 +176,7 @@ class BinanceApi implements ICexApi {
   public async get24hPriceChange(tokenSymbol: string, baseTokenSymbol: string): Promise<any> {
     try {
       const symbol = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
-      const response = await this.http.get('/api/v3/ticker/24hr', { symbol });
+      const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
       
       if (response.status === 200 && response.data) {
         return {

@@ -296,7 +296,7 @@ class UniswapAPI implements IDexApi {
         success: false,
         error: (error as Error).message
       };
-    }
+        }
   }
   
   /**

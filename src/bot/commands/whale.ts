@@ -1,6 +1,6 @@
 import { Context } from 'telegraf';
-import { monitorLargeTransactions } from '../../api/blockchain';
-import { formatAmount } from '../../utils';
+import { Markup } from 'telegraf';
+import websocketMonitor from '../../services/websocketMonitor';
 
 /**
  * 处理鲸鱼监控命令
@@ -8,88 +8,152 @@ import { formatAmount } from '../../utils';
  */
 export async function handleWhaleCommand(ctx: Context): Promise<void> {
   await ctx.sendChatAction('typing');
-  
+
   const message = ctx.message;
   // 确保消息是文本消息
   if (!message || !('text' in message)) {
     await ctx.reply('无法处理此类消息');
     return;
   }
-  
+
   // 解析命令参数
   const args = message.text.split(' ').filter(arg => arg.trim() !== '');
-  
-  // 默认监控值设置
-  let minValueEth = 100; // 以太坊默认100 ETH
-  let minValueSol = 500; // Solana默认500 SOL
-  
-  // 如果指定了金额参数
-  if (args.length > 1) {
-    try {
-      const amount = parseFloat(args[1]);
-      if (!isNaN(amount) && amount > 0) {
-        minValueEth = amount;
-        minValueSol = amount * 5; // Solana金额通常比ETH高几倍
-      }
-    } catch (error) {
-      // 忽略解析错误，使用默认值
-    }
-  }
-  
+
   try {
-    await ctx.reply(`正在监控大额交易，以太坊门槛: ${minValueEth} ETH，Solana门槛: ${minValueSol} SOL...`);
-    
-    // 获取大额交易
-    const results = await monitorLargeTransactions(minValueEth, minValueSol);
-    
-    // 处理结果
-    for (const chainResult of results) {
-      let message: string;
-      
-      if (chainResult.success) {
-        const transactions = chainResult.transactions;
-        
-        if (transactions.length === 0) {
-          message = `${chainResult.chain === 'ethereum' ? '以太坊' : 'Solana'}网络: 暂无符合条件的大额交易`;
+    // 获取WebSocket监听状态
+    const status = websocketMonitor.getStatus();
+
+    if (args.length > 1) {
+      const subCommand = args[1].toLowerCase();
+
+      if (subCommand === 'start') {
+        // 启动WebSocket监听
+        const success = await websocketMonitor.startMonitoring();
+        if (success) {
+          await ctx.reply('🚀 *WebSocket鲸鱼监听已启动*\n\n将实时监控以下链的大额交易:\n• 以太坊 (≥1 ETH)\n• Solana (≥10 SOL)\n• 比特币 (≥0.1 BTC)\n• Hyperliquid (≥$1,000)', { parse_mode: 'Markdown' });
         } else {
-          message = `
-🐳 *${chainResult.chain === 'ethereum' ? '以太坊' : 'Solana'}网络大额转账*
----------------------
-`;
-          
-          const limit = Math.min(5, transactions.length); // 最多显示5笔大额转账
-          
-          for (let i = 0; i < limit; i++) {
-            const tx = transactions[i];
-            const txUrl = chainResult.chain === 'ethereum'
-              ? `https://etherscan.io/tx/${tx.hash}`
-              : `https://solscan.io/tx/${tx.hash}`;
-              
-            const symbol = chainResult.chain === 'ethereum' ? 'ETH' : 'SOL';
-            const value = formatAmount(tx.value);
-            
-            message += `
-💰 *${value} ${symbol}*
-👤 从: [${tx.from.slice(0, 6)}...${tx.from.slice(-4)}](${chainResult.chain === 'ethereum' ? `https://etherscan.io/address/${tx.from}` : `https://solscan.io/account/${tx.from}`})
-👥 至: [${tx.to.slice(0, 6)}...${tx.to.slice(-4)}](${chainResult.chain === 'ethereum' ? `https://etherscan.io/address/${tx.to}` : `https://solscan.io/account/${tx.to}`})
-🔗 [查看交易](${txUrl})
-⏰ ${new Date(tx.timestamp * 1000).toLocaleString()}
-`;
-          }
-          
-          if (transactions.length > limit) {
-            message += `\n... 及其他 ${transactions.length - limit} 笔交易`;
-          }
+          await ctx.reply('⚠️ WebSocket监听已在运行中');
         }
-      } else {
-        message = `${chainResult.chain === 'ethereum' ? '以太坊' : 'Solana'}网络: 获取失败 - ${chainResult.error}`;
+        return;
       }
-      
-      // 发送消息
-      await ctx.reply(message, { parse_mode: 'Markdown' });
+
+      if (subCommand === 'stop') {
+        // 停止WebSocket监听
+        const success = websocketMonitor.stopMonitoring();
+        if (success) {
+          await ctx.reply('🛑 *WebSocket鲸鱼监听已停止*', { parse_mode: 'Markdown' });
+        } else {
+          await ctx.reply('⚠️ WebSocket监听未在运行');
+        }
+        return;
+      }
+
+      if (subCommand === 'status') {
+        // 显示监听状态
+        const statusText = status.active ? '🟢 运行中' : '🔴 已停止';
+        const connections = Object.entries(status.connections)
+          .map(([chain, conn]) => `${chain}: ${conn === 'connected' ? '🟢' : '🔴'}`)
+          .join('\n');
+
+        await ctx.reply(
+          `🐳 *WebSocket鲸鱼监听状态*\n\n` +
+          `状态: ${statusText}\n\n` +
+          `连接状态:\n${connections}\n\n` +
+          `监控阈值:\n` +
+          `• 以太坊: ≥1 ETH\n` +
+          `• Solana: ≥10 SOL\n` +
+          `• 比特币: ≥0.1 BTC\n` +
+          `• Hyperliquid: ≥$1,000`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
     }
+
+    // 默认显示帮助信息
+    const statusText = status.active ? '🟢 运行中' : '🔴 已停止';
+
+    await ctx.reply(
+      `🐋 *鲸鱼监控 - WebSocket实时监听*\n\n` +
+      `当前状态: ${statusText}\n\n` +
+      `💎 *现货大额交易监控:*\n` +
+      `🔵 以太坊: ≥50 ETH (~$125K)\n` +
+      `🟣 Solana: ≥500 SOL (~$75K)\n` +
+      `🟡 比特币: ≥5 BTC (~$325K)\n` +
+      `🟠 Hyperliquid: ≥$50,000\n\n` +
+      `📈 *合约交易监控:*\n` +
+      `🔵 以太坊DeFi: ≥$25,000\n` +
+      `🟣 Solana DeFi: ≥$15,000\n` +
+      `🟠 Hyperliquid合约: ≥$25,000\n\n` +
+      `🚨 检测到大额交易将自动推送到此频道`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('🚀 启动监听', 'whale_start'),
+            Markup.button.callback('🛑 停止监听', 'whale_stop')
+          ],
+          [
+            Markup.button.callback('📊 查看状态', 'whale_status')
+          ]
+        ])
+      }
+    );
+
   } catch (error) {
     const err = error as Error;
-    await ctx.reply(`监控大额交易时发生错误: ${err.message}`);
+    await ctx.reply(`处理鲸鱼监控命令时发生错误: ${err.message}`);
   }
+}
+
+/**
+ * 获取区块链的显示名称
+ * @param chain 链名
+ * @returns 显示名称
+ */
+function getChainDisplayName(chain: string): string {
+  switch (chain) {
+    case 'ethereum':
+      return '以太坊';
+    case 'solana':
+      return 'Solana';
+    case 'bitcoin':
+      return '比特币';
+    case 'hyperliquid':
+      return 'Hyperliquid';
+    default:
+      return chain;
+  }
+}
+
+/**
+ * 获取对应区块链的区块浏览器URL
+ * @param chain 链名
+ * @param hash 交易哈希/地址
+ * @param type 类型（交易或地址）
+ * @returns 浏览器URL
+ */
+function getExplorerUrl(chain: string, hash: string, type: 'tx' | 'address' = 'tx'): string {
+  switch (chain) {
+    case 'ethereum':
+      return `https://etherscan.io/${type}/${hash}`;
+    case 'solana':
+      return `https://solscan.io/${type === 'tx' ? 'tx' : 'account'}/${hash}`;
+    case 'bitcoin':
+      return `https://blockstream.info/${type === 'tx' ? 'tx' : 'address'}/${hash}`;
+    case 'hyperliquid':
+      return `https://explorer.hyperliquid.xyz/${type}/${hash}`;
+    default:
+      return '#';
+  }
+}
+
+/**
+ * 简化地址显示
+ * @param address 地址
+ */
+function shortenAddress(address: string): string {
+  if (!address || address === 'Unknown') return 'Unknown';
+  if (address.length < 10) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 } 

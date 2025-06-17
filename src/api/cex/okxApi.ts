@@ -53,12 +53,14 @@ class OkxApi implements ICexApi {
       console.log(`[OKX] 尝试获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
       
       // 格式化交易对
-      const instId = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
+      const instId = `${tokenSymbol}-${baseTokenSymbol}`;
       
       // 调用OKX API获取价格
-      const response = await this.http.get('/api/v5/market/ticker', { instId });
+      const response = await this.http.get('/api/v5/market/ticker', {
+        params: { instId }
+      });
       
-      if (response.status === 200 && response.data && response.data.data && response.data.data.length > 0) {
+      if (response.status === 200 && response.data && response.data.code === '0' && response.data.data && response.data.data.length > 0) {
         const price = parseFloat(response.data.data[0].last);
         console.log(`[OKX] ${tokenSymbol}/${baseTokenSymbol} 价格: ${price}`);
         
@@ -81,7 +83,8 @@ class OkxApi implements ICexApi {
         };
       }
     } catch (error: any) {
-      console.error(`[OKX] 获取价格失败:`, error);
+      // 简化错误日志
+      console.error(`[OKX] 获取价格失败: ${error.message || '未知错误'}`);
       
       return {
         exchange: this.getName(),
@@ -105,7 +108,7 @@ class OkxApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const instId = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/api/v5/market/ticker', { instId });
+          const response = await this.http.get('/api/v5/market/ticker', { instId: instId });
           if (response.status === 200 && response.data && response.data.data && response.data.data.length > 0) {
             return true;
           }

@@ -33,7 +33,7 @@ export const dexApis = {
 };
 
 // 导出CEX API
-export const cexApis = {
+export const cexApis: Record<string, any> = {
   binance: binanceApi,
   okx: okxApi,
   coinbase: coinbaseApi,
@@ -42,7 +42,7 @@ export const cexApis = {
 };
 
 // 导出聚合器
-export const aggregators = {
+export const aggregators: Record<string, any> = {
   price: priceAggregator,
   jupiter: jupiterAggregator
 };

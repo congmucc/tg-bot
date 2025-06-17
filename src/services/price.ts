@@ -1,46 +1,32 @@
-import { dexApis, aggregators } from '../api';
-import { getCryptoPrices, getFearAndGreedIndex as getFnG } from '../utils/crypto/cryptoUtils';
-import { tokens } from '../config/tokens';
+import axios from 'axios';
+import * as dotenv from 'dotenv';
 import HttpClient from '../utils/http/httpClient';
-import { getTokenBySymbol } from '../config/tokens';
-import { config } from '../config';
-import jupiterAggregator from '../api/aggregators/jupiterAggregator';
+import { API_CONFIG } from '../config/env';
 
-// 创建HttpClient实例
-const http = HttpClient.create();
-const coingeckoHttp = HttpClient.create('https://api.coingecko.com/api/v3');
-const binanceHttp = HttpClient.create('https://api.binance.com');
-const okxHttp = HttpClient.create('https://www.okx.com');
-const alternativeHttp = HttpClient.create('https://api.alternative.me');
+// 加载环境变量
+dotenv.config();
 
-/**
- * 加密货币价格信息接口
- */
-interface CryptoPrice {
-  market_data: {
-    current_price: {
-      usd: number;
-      cny?: number;
-    };
-    price_change_percentage_24h: number;
-    market_cap: {
-      usd: number;
-    };
+// 创建HTTP客户端
+const httpClient = new HttpClient(undefined, {
+  timeout: 5000,
+  retry: 2,
+  retryDelay: 2000
+});
+
+// 价格缓存
+const priceCache: Record<string, {
+  price: {
+    usd?: number;
+    cny?: number;
+    priceChange24h?: number;
   };
-}
+  timestamp: number;
+}> = {};
 
-/**
- * 获取恐惧贪婪指数接口
- */
-interface FNGResponse {
-  name: string;
-  data: {
-    value: string;
-    value_classification: string;
-    timestamp: string;
-    time_until_update: string;
-  }[];
-}
+// 缓存有效期（5分钟）
+const CACHE_TTL = 5 * 60 * 1000;
+
+
 
 /**
  * 获取代币价格信息
@@ -56,161 +42,86 @@ export async function getTokenPrice(tokenSymbol: string): Promise<{
   error?: string;
 }> {
   try {
-    // 常见代币符号到CoinGecko ID的映射
-    const symbolToId: {[key: string]: string} = {
-      'BTC': 'bitcoin',
-      'ETH': 'ethereum',
-      'SOL': 'solana',
-      'BNB': 'binancecoin',
-      'USDT': 'tether',
-      'USDC': 'usd-coin',
-      'XRP': 'ripple',
-      'ADA': 'cardano',
-      'DOGE': 'dogecoin',
-      'DOT': 'polkadot',
-      'LINK': 'chainlink',
-      'AVAX': 'avalanche-2',
-      'MATIC': 'matic-network',
-      'SHIB': 'shiba-inu',
-      'LTC': 'litecoin',
-      'ATOM': 'cosmos',
-      'UNI': 'uniswap',
-      'BCH': 'bitcoin-cash',
-      'TRX': 'tron',
-      'XLM': 'stellar'
+    // 标准化代币符号
+    const normalizedSymbol = tokenSymbol.toUpperCase();
+    
+    // 检查缓存
+    if (priceCache[normalizedSymbol] && Date.now() - priceCache[normalizedSymbol].timestamp < CACHE_TTL) {
+      const cachedPrice = priceCache[normalizedSymbol].price;
+      return {
+        success: true,
+        usdPrice: cachedPrice.usd,
+        cnyPrice: cachedPrice.cny,
+        priceChange24h: cachedPrice.priceChange24h,
+        source: 'cache'
+      };
+    }
+    
+    // 按优先级尝试不同的API源
+    const apiSources = [
+      {
+        name: 'CoinGecko',
+        fn: () => getCoinGeckoPrice(normalizedSymbol)
+      },
+      {
+        name: 'Binance',
+        fn: () => getBinancePrice(normalizedSymbol)
+      },
+      {
+        name: 'OKX',
+        fn: () => getOKXPrice(normalizedSymbol)
+      },
+      {
+        name: 'Huobi',
+        fn: () => getHuobiPrice(normalizedSymbol)
+      },
+      {
+        name: 'CryptoCompare',
+        fn: () => getCryptoComparePrice(normalizedSymbol)
+      },
+      {
+        name: 'CoinCap',
+        fn: () => getCoinCapPrice(normalizedSymbol)
+      }
+    ];
+
+    // 依次尝试每个API源
+    for (const source of apiSources) {
+      try {
+        console.log(`正在从${source.name}获取${normalizedSymbol}价格...`);
+        const result = await source.fn();
+
+        if (result.success && result.usdPrice) {
+          // 更新缓存
+          priceCache[normalizedSymbol] = {
+            price: {
+              usd: result.usdPrice,
+              cny: (result as any).cnyPrice,
+              priceChange24h: (result as any).priceChange24h
+            },
+            timestamp: Date.now()
+          };
+
+          console.log(`✅ ${source.name}成功获取${normalizedSymbol}价格: $${result.usdPrice}`);
+          return {
+            success: true,
+            usdPrice: result.usdPrice,
+            cnyPrice: (result as any).cnyPrice,
+            priceChange24h: (result as any).priceChange24h,
+            source: source.name
+          };
+        }
+      } catch (error) {
+        console.log(`❌ ${source.name}获取${normalizedSymbol}价格失败: ${(error as Error).message}`);
+        // 继续尝试下一个API源
+      }
+    }
+
+    // 所有API都失败
+    return {
+      success: false,
+      error: '所有价格API都无法获取数据'
     };
-    
-    // 首先尝试使用映射查找常见代币
-    if (symbolToId[tokenSymbol.toUpperCase()]) {
-      try {
-        const result = await getTokenPriceFromCoinGecko(symbolToId[tokenSymbol.toUpperCase()]);
-        if (result.success) {
-          return {
-            ...result,
-            source: 'CoinGecko'
-          };
-        }
-      } catch (error) {
-        // 如果失败，继续尝试其他方法
-        console.log(`通过ID获取${tokenSymbol}价格失败，尝试其他方法`);
-      }
-    }
-    
-    // 对于Solana代币，优先使用Jupiter聚合器
-    if (tokenSymbol.toUpperCase() === 'SOL' || getTokenBySymbol(tokenSymbol, 'solana')) {
-      try {
-        console.log(`尝试使用Jupiter聚合器获取${tokenSymbol}价格`);
-        const priceResults = await jupiterAggregator.getPrices(tokenSymbol, 'USDC');
-        const bestPrice = jupiterAggregator.getBestPrice(priceResults);
-        
-        if (bestPrice && bestPrice.success && bestPrice.price !== undefined) {
-          return {
-            success: true,
-            usdPrice: bestPrice.price,
-            source: 'Jupiter'
-          };
-        }
-      } catch (error) {
-        console.error(`Jupiter获取${tokenSymbol}价格失败:`, error);
-      }
-    }
-    
-    // 尝试在以太坊和Solana上查找代币
-    const ethereumToken = getTokenBySymbol(tokenSymbol, 'ethereum');
-    const solanaToken = getTokenBySymbol(tokenSymbol, 'solana');
-    
-    // 如果没有找到代币
-    if (!ethereumToken && !solanaToken) {
-      // 尝试直接使用符号作为ID查询
-      try {
-        const result = await getTokenPriceFromCoinGecko(tokenSymbol.toLowerCase());
-        if (result.success) {
-          return {
-            ...result,
-            source: 'CoinGecko'
-          };
-        }
-        return result;
-      } catch (coinGeckoError) {
-        return {
-          success: false,
-          error: `未找到代币 ${tokenSymbol}`
-        };
-      }
-    }
-
-    // 确定要使用的代币地址和链类型
-    const token = ethereumToken || solanaToken;
-    const chain = ethereumToken ? 'ethereum' : 'solana';
-    
-    // 对于特殊代币，直接从CoinGecko获取价格
-    // 处理BTC等原生代币
-    if (tokenSymbol.toUpperCase() === 'BTC') {
-      const result = await getTokenPriceFromCoinGecko('bitcoin');
-      if (result.success) {
-        return {
-          ...result,
-          source: 'CoinGecko'
-        };
-      }
-      return result;
-    }
-
-    if (tokenSymbol.toUpperCase() === 'ETH') {
-      const result = await getTokenPriceFromCoinGecko('ethereum');
-      if (result.success) {
-        return {
-          ...result,
-          source: 'CoinGecko'
-        };
-      }
-      return result;
-    }
-    
-    // 普通代币，使用具体地址尝试获取价格
-    try {
-      const coinId = chain === 'ethereum' 
-        ? `ethereum:${token!.address}` 
-        : `solana:${token!.address}`;
-        
-      const result = await getTokenPriceFromCoinGecko(coinId);
-      if (result.success) {
-        return {
-          ...result,
-          source: 'CoinGecko'
-        };
-      }
-      return result;
-    } catch (error) {
-      // 如果链地址查询失败，尝试直接使用代币符号
-      console.log(`通过地址获取${tokenSymbol}价格失败，尝试直接使用符号`);
-      try {
-        const result = await getTokenPriceFromCoinGecko(tokenSymbol.toLowerCase());
-        if (result.success) {
-          return {
-            ...result,
-            source: 'CoinGecko'
-          };
-        }
-        return result;
-      } catch (e) {
-        // 尝试从中心化交易所获取价格
-        const cexResult = await getCexTokenPrice(tokenSymbol);
-        if (cexResult.success && cexResult.price) {
-          return {
-            success: true,
-            usdPrice: cexResult.price,
-            source: cexResult.source || 'CEX'
-          };
-        }
-        
-        const err = e as Error;
-        return {
-          success: false,
-          error: `获取${tokenSymbol}价格失败: ${err.message}`
-        };
-      }
-    }
   } catch (error) {
     const err = error as Error;
     return {
@@ -221,10 +132,9 @@ export async function getTokenPrice(tokenSymbol: string): Promise<{
 }
 
 /**
- * 从CoinGecko获取代币价格
- * @param coinId CoinGecko上的代币ID
+ * 从CoinGecko获取价格
  */
-async function getTokenPriceFromCoinGecko(coinId: string): Promise<{
+async function getCoinGeckoPrice(symbol: string): Promise<{
   success: boolean;
   usdPrice?: number;
   cnyPrice?: number;
@@ -232,51 +142,183 @@ async function getTokenPriceFromCoinGecko(coinId: string): Promise<{
   error?: string;
 }> {
   try {
-    // 尝试获取详细价格信息，包括24小时变化
-    try {
-      const detailResponse = await coingeckoHttp.get(
-        `/coins/${coinId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false`
-      );
-      
-      if (detailResponse.data && detailResponse.data.market_data) {
-        const marketData = detailResponse.data.market_data;
+    const coingeckoId = getCoingeckoId(symbol);
+    const response = await httpClient.get(
+      `https://api.coingecko.com/api/v3/coins/${coingeckoId}`,
+      {
+        params: {
+          localization: false,
+          tickers: false,
+          market_data: true,
+          community_data: false,
+          developer_data: false
+        }
+      }
+    );
+
+    if (response.data && response.data.market_data) {
+      const marketData = response.data.market_data;
+      const usdPrice = marketData.current_price?.usd;
+
+      if (usdPrice) {
         return {
           success: true,
-          usdPrice: marketData.current_price.usd,
-          cnyPrice: marketData.current_price.cny,
+          usdPrice,
+          cnyPrice: marketData.current_price?.cny,
           priceChange24h: marketData.price_change_percentage_24h
         };
       }
-    } catch (error) {
-      console.log(`获取${coinId}详细价格信息失败，尝试简单价格查询`);
     }
-    
-    // 如果详细查询失败，使用简单价格查询
-    const response = await coingeckoHttp.get(
-      `/simple/price?ids=${coinId}&vs_currencies=usd,cny`
-    );
-    
-    const data = response.data;
-    const id = coinId.includes(':') ? coinId.split(':')[1] : coinId;
-    
-    if (!data[id]) {
+
+    return { success: false, error: 'No price data found' };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 从Binance获取价格
+ */
+async function getBinancePrice(symbol: string): Promise<{
+  success: boolean;
+  usdPrice?: number;
+  error?: string;
+}> {
+  try {
+    const binanceSymbol = `${symbol}USDT`;
+    const response = await httpClient.get(API_CONFIG.BINANCE_TICKER_API, {
+      params: { symbol: binanceSymbol }
+    });
+
+    if (response.data && response.data.price) {
       return {
-        success: false,
-        error: `在CoinGecko上未找到代币 ${id}`
+        success: true,
+        usdPrice: parseFloat(response.data.price)
       };
     }
-    
-    return {
-      success: true,
-      usdPrice: data[id].usd,
-      cnyPrice: data[id].cny
-    };
+
+    return { success: false, error: 'No price data found' };
   } catch (error) {
-    const err = error as Error;
-    return {
-      success: false,
-      error: `获取价格失败: ${err.message}`
-    };
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 从OKX获取价格
+ */
+async function getOKXPrice(symbol: string): Promise<{
+  success: boolean;
+  usdPrice?: number;
+  error?: string;
+}> {
+  try {
+    const response = await httpClient.get(API_CONFIG.OKX_TICKER_API, {
+      params: { instId: `${symbol}-USDT` }
+    });
+
+    if (response.data && response.data.code === '0' && response.data.data && response.data.data.length > 0) {
+      return {
+        success: true,
+        usdPrice: parseFloat(response.data.data[0].last)
+      };
+    }
+
+    return { success: false, error: 'No price data found' };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 从Huobi获取价格
+ */
+async function getHuobiPrice(symbol: string): Promise<{
+  success: boolean;
+  usdPrice?: number;
+  error?: string;
+}> {
+  try {
+    const response = await httpClient.get(`${API_CONFIG.HUOBI_API_BASE_URL}/market/detail/merged`, {
+      params: { symbol: `${symbol.toLowerCase()}usdt` }
+    });
+
+    if (response.data && response.data.status === 'ok' && response.data.tick) {
+      const price = (response.data.tick.bid[0] + response.data.tick.ask[0]) / 2;
+      return {
+        success: true,
+        usdPrice: price
+      };
+    }
+
+    return { success: false, error: 'No price data found' };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 从CryptoCompare获取价格
+ */
+async function getCryptoComparePrice(symbol: string): Promise<{
+  success: boolean;
+  usdPrice?: number;
+  cnyPrice?: number;
+  priceChange24h?: number;
+  error?: string;
+}> {
+  try {
+    const response = await httpClient.get('https://min-api.cryptocompare.com/data/price', {
+      params: {
+        fsym: symbol,
+        tsyms: 'USD,CNY'
+      }
+    });
+
+    if (response.data && response.data.USD) {
+      return {
+        success: true,
+        usdPrice: response.data.USD,
+        cnyPrice: response.data.CNY
+      };
+    }
+
+    return { success: false, error: 'No price data found' };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+/**
+ * 从CoinCap获取价格
+ */
+async function getCoinCapPrice(symbol: string): Promise<{
+  success: boolean;
+  usdPrice?: number;
+  priceChange24h?: number;
+  error?: string;
+}> {
+  try {
+    const response = await httpClient.get(`https://api.coincap.io/v2/assets`, {
+      params: { search: symbol }
+    });
+
+    if (response.data && response.data.data && response.data.data.length > 0) {
+      const tokenData = response.data.data.find((item: any) =>
+        item.symbol.toUpperCase() === symbol.toUpperCase()
+      );
+
+      if (tokenData) {
+        return {
+          success: true,
+          usdPrice: parseFloat(tokenData.priceUsd),
+          priceChange24h: parseFloat(tokenData.changePercent24Hr)
+        };
+      }
+    }
+
+    return { success: false, error: 'Token not found' };
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
   }
 }
 
@@ -315,34 +357,7 @@ export function calcPriceChangePercent(oldPrice: number, newPrice: number): numb
   return ((newPrice - oldPrice) / oldPrice) * 100;
 }
 
-/**
- * 获取交易对在DEX上的价格
- * @param baseToken 基础代币
- * @param quoteToken 交易代币
- */
-export async function getPairPrices(baseToken: string, quoteToken: string) {
-  try {
-    // 使用新的dexApis从每个DEX获取价格
-    const pricePromises = Object.values(dexApis).map(api => 
-      api.getTokenPrice(baseToken, quoteToken)
-    );
-    
-    const results = await Promise.all(pricePromises);
-    
-    return {
-      pair: `${baseToken}/${quoteToken}`,
-      prices: results,
-      success: true
-    };
-  } catch (error) {
-    const err = error as Error;
-    return {
-      pair: `${baseToken}/${quoteToken}`,
-      error: err.message,
-      success: false
-    };
-  }
-}
+
 
 /**
  * 获取常用代币的价格
@@ -353,20 +368,24 @@ export async function getCommonTokenPrices(): Promise<{
   formattedPrice: string;
 }[]> {
   try {
-    // 主流代币列表 - 增加更多主流代币
-    const commonTokens = ['BTC', 'ETH', 'SOL', 'USDT', 'USDC', 'BNB', 'XRP', 'DOGE', 'ADA', 'DOT'];
+    // 主流代币列表 - 只保留市值最高的几个
+    const commonTokens = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB'];
     const results = [];
 
     for (const symbol of commonTokens) {
       try {
+        console.log(`正在获取${symbol}价格...`);
         const priceData = await getTokenPrice(symbol);
-        
+
         if (priceData.success && priceData.usdPrice) {
           results.push({
             symbol,
             price: priceData.usdPrice,
             formattedPrice: formatTokenPrice(priceData.usdPrice)
           });
+          console.log(`✅ 成功获取${symbol}价格: $${priceData.usdPrice}`);
+        } else {
+          console.log(`❌ 获取${symbol}价格失败: ${priceData.error}`);
         }
       } catch (error) {
         console.error(`获取${symbol}价格失败:`, error);
@@ -382,50 +401,7 @@ export async function getCommonTokenPrices(): Promise<{
   }
 }
 
-/**
- * 获取加密货币价格
- * @param symbol 代币符号
- */
-export async function getCryptoPrice(symbol: string): Promise<CryptoPrice> {
-  try {
-    // 创建常见代币符号到ID的映射
-    const symbolToId: {[key: string]: string} = {
-      'btc': 'bitcoin',
-      'eth': 'ethereum',
-      'sol': 'solana',
-      'bnb': 'binancecoin',
-      'usdt': 'tether',
-      'usdc': 'usd-coin',
-      'xrp': 'ripple',
-      'ada': 'cardano',
-      'doge': 'dogecoin',
-      'dot': 'polkadot',
-    };
-    
-    // 获取正确的ID
-    const id = symbolToId[symbol.toLowerCase()] || symbol.toLowerCase();
-    
-    // 调用API
-    const response = await coingeckoHttp.get(`/coins/${id}`);
-    return response.data;
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(`获取价格失败: ${err.message}`);
-  }
-}
 
-/**
- * 获取恐惧贪婪指数
- */
-export async function getFearAndGreedIndex(): Promise<FNGResponse> {
-  try {
-    // 使用已经导入的工具函数
-    return await getFnG();
-  } catch (error) {
-    const err = error as Error;
-    throw new Error(`获取恐惧贪婪指数失败: ${err.message}`);
-  }
-}
 
 /**
  * 从中心化交易所获取代币价格
@@ -435,232 +411,74 @@ export async function getCexTokenPrice(symbol: string): Promise<{
   success: boolean;
   price?: number;
   source?: string;
-  error?: string;
 }> {
   try {
-    const symbolUpper = symbol.toUpperCase();
-    
-    // 尝试从Binance获取价格
+    // 使用API_CONFIG中的配置从Binance获取
     try {
-      // 尝试常见的交易对组合
-      const tradingPairs = ['USDT', 'USDC', 'USD', 'BTC', 'ETH'];
-      
-      for (const pair of tradingPairs) {
-        try {
-          const response = await binanceHttp.get(`/api/v3/ticker/price`, { 
-            symbol: `${symbolUpper}${pair}` 
-          }, {
-            timeout: 5000
-          });
-          
-          if (response.data && response.data.price) {
-            // 如果基础货币是BTC或ETH，需要转换为USD
-            if (pair === 'BTC' || pair === 'ETH') {
-              // 获取BTC或ETH的USD价格
-              const basePriceResponse = await binanceHttp.get(`/api/v3/ticker/price`, { 
-                symbol: `${pair}USDT` 
-              }, {
-                timeout: 3000
-              });
-              
-              if (basePriceResponse.data && basePriceResponse.data.price) {
-                const basePrice = parseFloat(basePriceResponse.data.price);
-                const tokenPrice = parseFloat(response.data.price);
-                return {
-                  success: true,
-                  price: tokenPrice * basePrice,
-                  source: 'Binance'
-                };
-              }
-            } else {
-              return {
-                success: true,
-                price: parseFloat(response.data.price),
-                source: 'Binance'
-              };
-            }
-          }
-        } catch (pairError) {
-          // 尝试下一个交易对
-          continue;
-        }
+      const response = await httpClient.get(API_CONFIG.BINANCE_TICKER_API, {
+        params: { symbol: `${symbol}USDT` },
+        timeout: 5000
+      });
+
+      if (response.data && response.data.price) {
+        return {
+          success: true,
+          price: parseFloat(response.data.price),
+          source: 'Binance'
+        };
       }
-    } catch (binanceError) {
-      console.log(`从Binance获取${symbol}价格失败`);
+    } catch (error) {
+      console.log(`Binance获取${symbol}价格失败`);
     }
     
-    // 尝试从OKX获取价格
+    // 使用API_CONFIG中的配置从Huobi获取
     try {
-      const tradingPairs = ['USDT', 'USDC', 'USD', 'BTC', 'ETH'];
-      
-      for (const pair of tradingPairs) {
-        try {
-          const response = await okxHttp.get(`/api/v5/market/ticker`, {
-            instId: `${symbolUpper}-${pair}`
-          }, {
-            timeout: 5000
-          });
-          
-          if (response.data && 
-              response.data.data && 
-              response.data.data.length > 0 && 
-              response.data.data[0].last) {
-            
-            // 如果基础货币是BTC或ETH，需要转换为USD
-            if (pair === 'BTC' || pair === 'ETH') {
-              try {
-                const basePriceResponse = await okxHttp.get(`/api/v5/market/ticker`, {
-                  instId: `${pair}-USDT`
-                }, {
-                  timeout: 3000
-                });
-                
-                if (basePriceResponse.data && 
-                    basePriceResponse.data.data && 
-                    basePriceResponse.data.data.length > 0 && 
-                    basePriceResponse.data.data[0].last) {
-                  const basePrice = parseFloat(basePriceResponse.data.data[0].last);
-                  const tokenPrice = parseFloat(response.data.data[0].last);
-                  return {
-                    success: true,
-                    price: tokenPrice * basePrice,
-                    source: 'OKX'
-                  };
-                }
-              } catch (error) {
-                // 如果转换失败，继续尝试其他交易对
-                continue;
-              }
-            } else {
-              return {
-                success: true,
-                price: parseFloat(response.data.data[0].last),
-                source: 'OKX'
-              };
-            }
-          }
-        } catch (pairError) {
-          // 尝试下一个交易对
-          continue;
-        }
+      const response = await httpClient.get(`${API_CONFIG.HUOBI_API_BASE_URL}/market/detail/merged`, {
+        params: { symbol: `${symbol.toLowerCase()}usdt` }
+      });
+
+      if (response.data && response.data.status === 'ok' && response.data.tick) {
+        return {
+          success: true,
+          price: (response.data.tick.bid[0] + response.data.tick.ask[0]) / 2,
+          source: 'Huobi'
+        };
       }
-    } catch (okxError) {
-      console.log(`从OKX获取${symbol}价格失败`);
+    } catch (error) {
+      console.log(`Huobi获取${symbol}价格失败`);
     }
     
-    // 尝试从CoinGecko获取价格
+    // 使用API_CONFIG中的配置从OKX获取
     try {
-      // 常见代币符号到CoinGecko ID的映射
-      const symbolToId: {[key: string]: string} = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'SOL': 'solana',
-        'BNB': 'binancecoin',
-        'USDT': 'tether',
-        'USDC': 'usd-coin',
-        'XRP': 'ripple',
-        'ADA': 'cardano',
-        'DOGE': 'dogecoin',
-        'DOT': 'polkadot',
-        'LINK': 'chainlink',
-        'AVAX': 'avalanche-2',
-        'MATIC': 'matic-network',
-        'SHIB': 'shiba-inu',
-        'LTC': 'litecoin',
-        'ATOM': 'cosmos',
-        'UNI': 'uniswap',
-        'BCH': 'bitcoin-cash',
-        'TRX': 'tron',
-        'XLM': 'stellar',
-        'FIL': 'filecoin',
-        'NEAR': 'near',
-        'ALGO': 'algorand',
-        'ICP': 'internet-computer',
-        'EOS': 'eos'
+      const response = await httpClient.get(API_CONFIG.OKX_TICKER_API, {
+        params: { instId: `${symbol}-USDT` }
+      });
+
+      if (response.data && response.data.code === '0' && response.data.data && response.data.data.length > 0) {
+        return {
+          success: true,
+          price: parseFloat(response.data.data[0].last),
+          source: 'OKX'
+        };
+      }
+    } catch (error) {
+      console.log(`OKX获取${symbol}价格失败`);
+    }
+    
+    // 如果所有交易所都失败，尝试使用价格API
+    const priceData = await getTokenPrice(symbol);
+    if (priceData.success && priceData.usdPrice) {
+      return {
+        success: true,
+        price: priceData.usdPrice,
+        source: 'CoinGecko'
       };
-      
-      // 尝试多种ID组合
-      const possibleIds = [
-        symbolToId[symbolUpper], // 从映射表中获取
-        symbolUpper.toLowerCase(), // 全小写
-        symbol.toLowerCase(), // 保持原始大小写的小写版本
-        symbol.toLowerCase() + '-token', // 有些代币加token后缀
-        symbol.toLowerCase() + '-protocol', // 有些代币加protocol后缀
-        symbol.toLowerCase() + '-coin' // 有些代币加coin后缀
-      ].filter(id => id); // 过滤掉undefined
-      
-      for (const coinId of possibleIds) {
-        try {
-          const response = await coingeckoHttp.get(`/simple/price`, {
-            ids: coinId,
-            vs_currencies: 'usd'
-          }, {
-            timeout: 5000
-          });
-          
-          if (response.data && response.data[coinId] && response.data[coinId].usd) {
-            return {
-              success: true,
-              price: response.data[coinId].usd,
-              source: 'CoinGecko'
-            };
-          }
-        } catch (idError) {
-          // 尝试下一个ID
-          continue;
-        }
-      }
-      
-      // 尝试通过搜索API找到正确的ID
-      try {
-        const searchResponse = await coingeckoHttp.get(`/search`, {
-          query: symbol
-        }, {
-          timeout: 5000
-        });
-        
-        if (searchResponse.data && 
-            searchResponse.data.coins && 
-            searchResponse.data.coins.length > 0) {
-          
-          // 获取找到的第一个结果的ID
-          const foundId = searchResponse.data.coins[0].id;
-          
-          // 使用找到的ID获取价格
-          const priceResponse = await coingeckoHttp.get(`/simple/price`, {
-            ids: foundId,
-            vs_currencies: 'usd'
-          }, {
-            timeout: 5000
-          });
-          
-          if (priceResponse.data && 
-              priceResponse.data[foundId] && 
-              priceResponse.data[foundId].usd) {
-            return {
-              success: true,
-              price: priceResponse.data[foundId].usd,
-              source: 'CoinGecko (Search)'
-            };
-          }
-        }
-      } catch (searchError) {
-        console.log(`CoinGecko搜索失败:`, searchError);
-      }
-    } catch (cgError) {
-      console.log(`从CoinGecko获取${symbol}价格失败`);
     }
     
-    return {
-      success: false,
-      error: `无法从任何交易所获取${symbol}价格`
-    };
+    return { success: false };
   } catch (error) {
-    const err = error as Error;
-    return {
-      success: false,
-      error: err.message
-    };
+    console.error(`获取${symbol}价格失败`);
+    return { success: false };
   }
 }
 
@@ -668,9 +486,6 @@ export default {
   getTokenPrice,
   formatTokenPrice,
   calcPriceChangePercent,
-  getPairPrices,
   getCommonTokenPrices,
-  getCryptoPrice,
-  getFearAndGreedIndex,
   getCexTokenPrice
-}; 
+};

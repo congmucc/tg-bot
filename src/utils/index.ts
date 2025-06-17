@@ -10,6 +10,9 @@ export { HttpClient };
 // 加密货币工具
 export * from './crypto/cryptoUtils';
 
+// 格式化工具
+export * from './format';
+
 // 其他工具...
 
 // 默认导出所有工具
@@ -17,35 +20,7 @@ export default {
   HttpClient,
 };
 
-/**
- * 格式化金额，适当添加千位分隔符和小数位数限制
- * @param amount 金额字符串或数字
- * @param decimals 小数位数（默认4位）
- */
-export function formatAmount(amount: string | number, decimals: number = 4): string {
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  
-  if (isNaN(num)) {
-    return '0';
-  }
-  
-  // 对于非常大和非常小的数字使用不同的格式
-  if (num < 0.0001) {
-    return num.toExponential(2);
-  } else if (num < 0.01) {
-    return num.toFixed(6);
-  } else if (num < 1) {
-    return num.toFixed(4);
-  } else if (num < 1000) {
-    return num.toFixed(decimals);
-  } else if (num < 1000000) {
-    return (num / 1000).toFixed(2) + 'K';
-  } else if (num < 1000000000) {
-    return (num / 1000000).toFixed(2) + 'M';
-  } else {
-    return (num / 1000000000).toFixed(2) + 'B';
-  }
-}
+// 重复的formatAmount函数已移除，使用format.ts中的版本
 
 /**
  * 缩略地址，只显示开头和结尾的几个字符

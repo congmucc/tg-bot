@@ -104,7 +104,8 @@ class HttpClient {
         // 只在非重试请求时打印日志，且仅在debug级别
         const httpConfig = config as HttpRequestOptions;
         if (this.logLevel === 'debug' && (!httpConfig._retryCount || httpConfig._retryCount === 0)) {
-          console.log(`[HTTP] 请求: ${config.method?.toUpperCase()} ${url}`);
+          const fullUrl = this.buildFullUrl(url, config);
+          console.log(`[HTTP] 请求: ${config.method?.toUpperCase()} ${fullUrl}`);
         }
         
         return config;
@@ -112,7 +113,7 @@ class HttpClient {
       (error) => {
         // 对请求错误做些什么
         if (this.logLevel !== 'none') {
-          console.error(`[HTTP] 请求错误:`, error);
+        console.error(`[HTTP] 请求错误:`, error);
         }
         return Promise.reject(error);
       }
@@ -123,7 +124,7 @@ class HttpClient {
       (response) => {
         // 对响应数据做点什么，只在debug级别打印
         if (this.logLevel === 'debug') {
-          console.log(`[HTTP] 响应: ${response.status} ${response.config.url}`);
+        console.log(`[HTTP] 响应: ${response.status} ${response.config.url}`);
         }
         return response;
       },
@@ -173,7 +174,7 @@ class HttpClient {
           
           // 只在第一次重试且warn级别以上时打印日志，避免日志过多
           if (config._retryCount === 1 && this.logLevel !== 'none' && this.logLevel !== 'error') {
-            console.log(`[HTTP] 重试请求 (${config._retryCount}/${config.retry}): ${config.url}`);
+          console.log(`[HTTP] 重试请求 (${config._retryCount}/${config.retry}): ${config.url}`);
           }
           
           // 创建延迟Promise，增加重试延迟时间
@@ -184,7 +185,7 @@ class HttpClient {
         }
         
         if (this.logLevel !== 'none') {
-          console.error(`[HTTP] 请求失败: ${error.message}`, error.response?.data);
+        console.error(`[HTTP] 请求失败: ${error.message}`, error.response?.data);
         }
         return Promise.reject(error);
       }
@@ -257,67 +258,43 @@ class HttpClient {
     return false;
   }
 
-  /**
-   * 发送HTTP请求
-   * @param method HTTP方法
-   * @param url 请求URL
-   * @param data 请求数据
-   * @param options 请求选项
-   * @returns 请求响应
-   */
-  public async request<T = any>(
-    method: HttpMethod,
-    url: string,
-    data?: any,
-    options?: HttpRequestOptions
-  ): Promise<HttpResponse<T>> {
-    try {
-      const config: HttpRequestOptions = {
-        ...options,
-        method,
-        url,
-      };
 
-      // 根据HTTP方法决定数据放在params还是data中
-      if (method === 'GET' || method === 'DELETE') {
-        config.params = data;
-      } else {
-        config.data = data;
-      }
-
-      const response = await this.instance.request<T>(config);
-      return {
-        data: response.data,
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        config: response.config as HttpRequestOptions,
-      };
-    } catch (error) {
-      console.error(`[HTTP] ${method} ${url} 失败:`, error);
-      throw error;
-    }
-  }
 
   /**
    * 发送GET请求
    * @param url 请求URL
-   * @param params 请求参数
-   * @param options 请求选项
+   * @param options 请求选项 (包含params查询参数)
    * @returns 请求响应
    */
   public async get<T = any>(
     url: string,
-    params?: any,
     options?: HttpRequestOptions
   ): Promise<HttpResponse<T>> {
-    return this.request<T>('GET', url, params, options);
+    const config: HttpRequestOptions = {
+      ...options,
+      method: 'GET',
+      url,
+    };
+
+    // GET请求的参数放在params中
+    if (options?.params) {
+      config.params = options.params;
+    }
+
+    const response = await this.instance.request<T>(config);
+    return {
+      data: response.data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      config: response.config as HttpRequestOptions,
+    };
   }
 
   /**
    * 发送POST请求
    * @param url 请求URL
-   * @param data 请求数据
+   * @param data 请求体数据
    * @param options 请求选项
    * @returns 请求响应
    */
@@ -326,13 +303,27 @@ class HttpClient {
     data?: any,
     options?: HttpRequestOptions
   ): Promise<HttpResponse<T>> {
-    return this.request<T>('POST', url, data, options);
+    const config: HttpRequestOptions = {
+      ...options,
+      method: 'POST',
+      url,
+      data, // POST请求的数据放在body中
+    };
+
+    const response = await this.instance.request<T>(config);
+    return {
+      data: response.data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      config: response.config as HttpRequestOptions,
+    };
   }
 
   /**
    * 发送PUT请求
    * @param url 请求URL
-   * @param data 请求数据
+   * @param data 请求体数据
    * @param options 请求选项
    * @returns 请求响应
    */
@@ -341,22 +332,52 @@ class HttpClient {
     data?: any,
     options?: HttpRequestOptions
   ): Promise<HttpResponse<T>> {
-    return this.request<T>('PUT', url, data, options);
+    const config: HttpRequestOptions = {
+      ...options,
+      method: 'PUT',
+      url,
+      data, // PUT请求的数据放在body中
+    };
+
+    const response = await this.instance.request<T>(config);
+    return {
+      data: response.data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      config: response.config as HttpRequestOptions,
+    };
   }
 
   /**
    * 发送DELETE请求
    * @param url 请求URL
-   * @param params 请求参数
-   * @param options 请求选项
+   * @param options 请求选项 (包含params查询参数)
    * @returns 请求响应
    */
   public async delete<T = any>(
     url: string,
-    params?: any,
     options?: HttpRequestOptions
   ): Promise<HttpResponse<T>> {
-    return this.request<T>('DELETE', url, params, options);
+    const config: HttpRequestOptions = {
+      ...options,
+      method: 'DELETE',
+      url,
+    };
+
+    // DELETE请求的参数放在params中
+    if (options?.params) {
+      config.params = options.params;
+    }
+
+    const response = await this.instance.request<T>(config);
+    return {
+      data: response.data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      config: response.config as HttpRequestOptions,
+    };
   }
 
   /**
@@ -375,6 +396,41 @@ class HttpClient {
    */
   public setLogLevel(level: 'none' | 'error' | 'warn' | 'info' | 'debug'): void {
     this.logLevel = level;
+  }
+
+  /**
+   * 构建完整URL用于日志记录
+   * @param url 请求URL
+   * @param config 请求配置
+   * @returns 完整URL
+   */
+  private buildFullUrl(url: string, config: AxiosRequestConfig): string {
+    try {
+      let fullUrl = url;
+
+      // 如果有baseURL，构建完整URL
+      if (this.instance.defaults.baseURL && !url.startsWith('http')) {
+        fullUrl = `${this.instance.defaults.baseURL}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+
+      // 添加查询参数
+      if (config.params) {
+        const searchParams = new URLSearchParams();
+        Object.entries(config.params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            searchParams.append(key, String(value));
+          }
+        });
+        const queryString = searchParams.toString();
+        if (queryString) {
+          fullUrl += `${fullUrl.includes('?') ? '&' : '?'}${queryString}`;
+        }
+      }
+
+      return fullUrl;
+    } catch (error) {
+      return url; // 如果构建失败，返回原始URL
+    }
   }
 }
 

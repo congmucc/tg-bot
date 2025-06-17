@@ -6,10 +6,10 @@
 
 - 市场情绪分析（恐惧贪婪指数）
 - 代币价格查询（支持多种交易所）
-- Solana 网络状态监控
+
 - 交易平台价格聚合（DEX + CEX）
 - 流动性池分析
-- 大额转账监控（鲸鱼警报）
+- 大额转账监控（鲸鱼警报）- **新增比特币支持！**
 - 定时市场报告
 
 ## 项目结构
@@ -34,6 +34,12 @@ src/
 │   │   ├── raydium.ts
 │   │   ├── syncswapApi.ts
 │   │   └── uniswap.ts
+│   ├── blockchain/     # 区块链 API
+│   │   ├── ethereum.ts     # 以太坊 API
+│   │   ├── solana.ts       # Solana API
+│   │   ├── bitcoin.ts      # 比特币 API (新增)
+│   │   ├── hyperliquidApi.ts # Hyperliquid API
+│   │   └── index.ts        # 区块链 API 统一接口
 │   ├── interfaces/     # API 接口定义
 │   │   └── exchangeApi.ts
 │   └── index.ts        # API 模块入口
@@ -88,8 +94,28 @@ npm start
 - `/solana` - 查看 Solana 网络状态
 - `/compare [代币符号]` - 交易平台价格聚合(DEX+CEX)
 - `/liquidity [LP地址] [链]` - 查询流动性池
-- `/whale [数量]` - 监控大额转账
+- `/whale [数量]` - 监控大额转账 (支持ETH/SOL/BTC/Hyperliquid)
 - `/help` - 显示帮助信息
+
+## 🆕 最新更新
+
+### 比特币支持
+- ✅ 新增比特币大额交易监控
+- ✅ 支持BTC链上交易查询
+- ✅ 集成Blockstream API
+- ✅ 完整的测试覆盖
+
+### 代码优化
+- ✅ 移除冗余代码和未使用的导入
+- ✅ 统一格式化函数
+- ✅ 优化错误处理机制
+- ✅ 提升性能和稳定性
+
+### 测试完善
+- ✅ 新增Bitcoin API测试
+- ✅ 鲸鱼监控服务测试
+- ✅ 区块链集成测试
+- ✅ 所有测试通过 (22/22)
 
 ## 技术栈
 
@@ -98,6 +124,8 @@ npm start
 - Telegraf.js (Telegram Bot API)
 - 各种 DEX/CEX API
 - Jupiter API (Solana)
+- Blockstream API (Bitcoin)
+- Hyperliquid API
 
 ## 贡献指南
 

@@ -11,13 +11,17 @@ import huobiApi from '../cex/huobiApi';
  */
 class PriceAggregator implements IPriceAggregator {
   // 交易所API列表
-  public exchangeApis = [
-    binanceApi,
-    okxApi,
-    coinbaseApi,
-    krakenApi,
-    huobiApi
-  ];
+  declare public exchangeApis: any[];
+  
+  constructor() {
+    this.exchangeApis = [
+      binanceApi,
+      okxApi,
+      coinbaseApi,
+      krakenApi,
+      huobiApi
+    ];
+  }
   
   /**
    * 获取聚合器名称
@@ -37,7 +41,7 @@ class PriceAggregator implements IPriceAggregator {
     
     const pricePromises = this.exchangeApis.map(api => 
       api.getTokenPrice(tokenSymbol, baseTokenSymbol)
-        .catch(error => {
+        .catch((error: Error) => {
           console.error(`[PriceAggregator] 从 ${api.getName()} 获取价格失败:`, error);
           return {
             exchange: api.getName(),

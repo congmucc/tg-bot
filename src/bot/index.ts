@@ -1,7 +1,7 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { Message } from 'telegraf/typings/core/types/typegram';
 import { config } from '../config';
-import { getFearAndGreedIndex } from '../api';
+import { getFearAndGreedIndex } from '../services/price';
 import { formatTokenPrice } from '../services/price';
 import * as commands from './commands';
 import { setupMiddleware } from './middleware';
