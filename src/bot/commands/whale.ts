@@ -81,10 +81,10 @@ export async function handleWhaleCommand(ctx: Context): Promise<void> {
       `🟣 Solana: ≥500 SOL (~$75K)\n` +
       `🟡 比特币: ≥5 BTC (~$325K)\n` +
       `🟠 Hyperliquid: ≥$50,000\n\n` +
-      `📈 *合约交易监控:*\n` +
-      `🔵 以太坊DeFi: ≥$25,000\n` +
-      `🟣 Solana DeFi: ≥$15,000\n` +
-      `🟠 Hyperliquid合约: ≥$25,000\n\n` +
+      `📈 *合约交易监控 (测试阈值):*\n` +
+      `🔵 以太坊DeFi: ≥$1,000\n` +
+      `🟣 Solana DeFi: ≥$500\n` +
+      `🟠 Hyperliquid合约: ≥$1,000\n\n` +
       `🚨 检测到大额交易将自动推送到此频道`,
       {
         parse_mode: 'Markdown',

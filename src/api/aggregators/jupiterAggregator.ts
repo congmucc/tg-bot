@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { API_CONFIG, TOKEN_ADDRESSES } from '../../config/env';
+import { API_CONFIG } from '../../config/env';
+import { tokens } from '../../config/tokens';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ExchangeType, BlockchainType, PriceResult, IPriceAggregator } from '../interfaces/exchangeApi';
 
@@ -120,20 +121,25 @@ class JupiterAggregator implements IPriceAggregator {
       
       // 特殊处理SOL和其他常用代币
       const upperSymbol = symbol.toUpperCase();
-      // 使用类型安全的方法检查代币地址
-      if (upperSymbol === 'SOL') {
-        console.log(`[Jupiter] 使用预设地址: SOL -> ${TOKEN_ADDRESSES.SOL}`);
-        return TOKEN_ADDRESSES.SOL;
-      } else if (upperSymbol === 'USDC') {
-        return TOKEN_ADDRESSES.USDC;
-      } else if (upperSymbol === 'USDT') {
-        return TOKEN_ADDRESSES.USDT;
-      } else if (upperSymbol === 'WIF') {
-        return TOKEN_ADDRESSES.WIF;
-      } else if (upperSymbol === 'BTC') {
-        return TOKEN_ADDRESSES.BTC;
+
+      // 从Solana代币配置中获取地址
+      const solanaToken = tokens.solana[upperSymbol];
+      if (solanaToken) {
+        console.log(`[Jupiter] 使用预设地址: ${upperSymbol} -> ${solanaToken.address}`);
+        return solanaToken.address === 'native' ? 'So11111111111111111111111111111111111111112' : solanaToken.address;
+      }
+
+      // 特殊处理一些映射
+      if (upperSymbol === 'BTC') {
+        // Solana上没有原生BTC，尝试查找包装版本
+        console.log(`[Jupiter] BTC在Solana上不存在，将通过API查找`);
       } else if (upperSymbol === 'ETH') {
-        return TOKEN_ADDRESSES.ETH;
+        // 使用Solana上的WETH
+        const wethToken = tokens.solana['WETH'];
+        if (wethToken) {
+          console.log(`[Jupiter] 使用WETH代替ETH: ${wethToken.address}`);
+          return wethToken.address;
+        }
       }
       
       console.log(`[Jupiter] 获取代币列表...`);

@@ -4,7 +4,6 @@ import { PriceResult } from '../interfaces/exchangeApi';
 import binanceApi from './binanceApi';
 import okxApi from './okxApi';
 import coinbaseApi from './coinbaseApi';
-import krakenApi from './krakenApi';
 import huobiApi from './huobiApi';
 
 /**
@@ -17,17 +16,28 @@ export interface CexPriceResult {
   error?: string;
 }
 
-// 所有CEX API列表
+// 所有CEX API - 延长超时时间，让更多API有机会成功
 const cexApis = [
-  binanceApi,
   okxApi,
   coinbaseApi,
-  krakenApi,
-  huobiApi
+  binanceApi, // 虽然有地区限制，但让它尝试
+  huobiApi    // 延长超时时间，让它有机会成功
 ];
 
 /**
- * 从中心化交易所获取代币价格
+ * 创建带超时的Promise
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`请求超时 (${timeoutMs}ms)`)), timeoutMs)
+    )
+  ]);
+}
+
+/**
+ * 从中心化交易所获取代币价格 - 优化并发版本
  * @param tokenSymbol 代币符号
  * @param baseTokenSymbol 基础代币符号
  * @returns 不同交易所的价格结果
@@ -36,41 +46,65 @@ export async function getPriceFromCexes(
   tokenSymbol: string,
   baseTokenSymbol: string
 ): Promise<CexPriceResult[]> {
-  const results: CexPriceResult[] = [];
-  
-  // 并行获取不同CEX上的价格
-  const promises = cexApis.map(api => 
-    api.getTokenPrice(tokenSymbol, baseTokenSymbol)
-      .then(result => {
-        if (result.success && result.price !== undefined) {
-          console.log(`[${api.getName()}] 获取的价格: ${result.price}`);
-          results.push({
-            exchange: api.getName(),
-            success: true,
-            price: result.price
-          });
-        } else {
-          results.push({
-            exchange: api.getName(),
-            success: false,
-            error: result.error || '未找到价格'
-          });
-        }
-      })
-      .catch(error => {
-        console.error(`[${api.getName()}] 获取价格失败:`, error.message);
-        results.push({
-          exchange: api.getName(),
+  console.log(`🚀 并发查询${cexApis.length}个CEX的${tokenSymbol}/${baseTokenSymbol}价格...`);
+
+  // 并发获取所有CEX价格，每个请求都有独立的超时
+  const promises = cexApis.map(async (api) => {
+    const exchangeName = api.getName();
+    try {
+      console.log(`[${exchangeName}] 开始查询...`);
+
+      // 为每个API请求设置15秒超时，给更多时间让API成功
+      const result = await withTimeout(
+        api.getTokenPrice(tokenSymbol, baseTokenSymbol),
+        15000
+      );
+
+      if (result.success && result.price !== undefined) {
+        console.log(`✅ [${exchangeName}] 成功: $${result.price}`);
+        return {
+          exchange: exchangeName,
+          success: true,
+          price: result.price
+        };
+      } else {
+        console.log(`❌ [${exchangeName}] 失败: ${result.error || '未找到价格'}`);
+        return {
+          exchange: exchangeName,
           success: false,
-          error: error.message
-          });
-      })
-  );
-  
-  // 等待所有价格查询完成
-  await Promise.all(promises);
-  
-  return results;
+          error: result.error || '未找到价格'
+        };
+      }
+    } catch (error: any) {
+      console.log(`❌ [${exchangeName}] 异常: ${error.message}`);
+      return {
+        exchange: exchangeName,
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 使用Promise.allSettled等待所有请求完成，不会因为单个失败而中断
+  const results = await Promise.allSettled(promises);
+
+  // 提取所有结果
+  const cexResults: CexPriceResult[] = results.map(result => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    } else {
+      return {
+        exchange: 'unknown',
+        success: false,
+        error: result.reason?.message || '请求失败'
+      };
+    }
+  });
+
+  const successCount = cexResults.filter(r => r.success).length;
+  console.log(`📊 CEX查询完成: ${successCount}/${cexApis.length} 成功`);
+
+  return cexResults;
 }
 
 /**
@@ -132,7 +166,6 @@ class CexApiManager {
       binance: binanceApi,
       okx: okxApi,
       coinbase: coinbaseApi,
-      kraken: krakenApi,
       huobi: huobiApi
     };
   }
@@ -143,7 +176,6 @@ export {
   binanceApi,
   okxApi,
   coinbaseApi,
-  krakenApi,
   huobiApi
 };
 
@@ -155,7 +187,6 @@ const cexApiManager = new CexApiManager() as {
     binance: typeof binanceApi;
     okx: typeof okxApi;
     coinbase: typeof coinbaseApi;
-    kraken: typeof krakenApi;
     huobi: typeof huobiApi;
   };
 };

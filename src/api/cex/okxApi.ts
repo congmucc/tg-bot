@@ -108,7 +108,7 @@ class OkxApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const instId = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/api/v5/market/ticker', { instId: instId });
+          const response = await this.http.get('/api/v5/market/ticker', { params: { instId: instId } });
           if (response.status === 200 && response.data && response.data.data && response.data.data.length > 0) {
             return true;
           }

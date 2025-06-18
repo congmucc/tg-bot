@@ -122,7 +122,7 @@ class UniswapAPI implements IDexApi {
           console.log('[Uniswap] 尝试从CoinGecko获取SOL/USDC价格...');
           const geckoResponse = await axios.get(
             'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-            { timeout: 10000 }
+            { timeout: 60000 }
           );
           
           if (geckoResponse.data && geckoResponse.data.solana && geckoResponse.data.solana.usd) {
@@ -162,7 +162,7 @@ class UniswapAPI implements IDexApi {
         console.log(`[Uniswap] 尝试从CoinGecko获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
         const geckoResponse = await axios.get(
           `https://api.coingecko.com/api/v3/simple/price?ids=${tokenSymbol.toLowerCase()}&vs_currencies=usd`,
-          { timeout: 10000 }
+          { timeout: 60000 }
         );
         
         if (geckoResponse.data && 
@@ -183,37 +183,7 @@ class UniswapAPI implements IDexApi {
         console.error('[Uniswap] CoinGecko API失败:', geckoError);
       }
       
-      // 尝试通过Binance获取
-      try {
-        console.log(`[Uniswap] 尝试从Binance获取 ${tokenSymbol}/${baseTokenSymbol} 价格...`);
-        
-        // 如果是USDC交易对，尝试使用USDT
-        let binanceSymbol = `${tokenSymbol}${baseTokenSymbol}`;
-        if (baseTokenSymbol.toUpperCase() === 'USDC') {
-          binanceSymbol = `${tokenSymbol}USDT`;
-          console.log(`[Uniswap] USDC交易对可能不存在，尝试使用USDT交易对: ${binanceSymbol}`);
-        }
-        
-        const binanceResponse = await axios.get(
-          `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
-          { timeout: 10000 }
-        );
-        
-        if (binanceResponse.data && binanceResponse.data.price) {
-          const price = binanceResponse.data.price;
-          console.log(`[Uniswap] 从Binance获取的价格: ${price}`);
-          return {
-            exchange: this.getName(),
-            exchangeType: this.getType(),
-            blockchain: this.getBlockchain(),
-            success: true,
-            price: parseFloat(price),
-            timestamp: Date.now()
-          };
-        }
-      } catch (binanceError) {
-        console.error('[Uniswap] Binance API失败:', binanceError);
-      }
+
       
       // 如果前两种方法都失败，再尝试使用Uniswap链上数据
       console.log('[Uniswap] 第三方API获取价格失败，尝试从链上获取价格');

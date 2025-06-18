@@ -2,7 +2,6 @@ import { IPriceAggregator, PriceResult } from '../interfaces/exchangeApi';
 import binanceApi from '../cex/binanceApi';
 import okxApi from '../cex/okxApi';
 import coinbaseApi from '../cex/coinbaseApi';
-import krakenApi from '../cex/krakenApi';
 import huobiApi from '../cex/huobiApi';
 
 /**
@@ -18,7 +17,6 @@ class PriceAggregator implements IPriceAggregator {
       binanceApi,
       okxApi,
       coinbaseApi,
-      krakenApi,
       huobiApi
     ];
   }

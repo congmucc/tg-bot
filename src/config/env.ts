@@ -10,7 +10,7 @@ import 'dotenv/config';
  */
 export const API_CONFIG = {
   // Jupiter API
-  JUPITER_PRICE_API: 'https://price.jup.ag/v4/price',
+  JUPITER_PRICE_API: 'https://lite-api.jup.ag/price/v2',
   JUPITER_TOKEN_LIST_API: 'https://token.jup.ag/all',
   JUPITER_SWAP_API: 'https://quote-api.jup.ag/v6/quote',
   

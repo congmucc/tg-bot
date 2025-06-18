@@ -45,11 +45,11 @@ class WebSocketMonitor {
     hyperliquid: 50000 // $50,000
   };
 
-  // 合约交易监控阈值
+  // 合约交易监控阈值 (降低用于测试)
   private contractThresholds = {
-    ethereum: 25000,    // $25,000 USD
-    solana: 15000,      // $15,000 USD
-    hyperliquid: 25000  // $25,000 USD
+    ethereum: 1000,     // $1,000 USD (测试用)
+    solana: 500,        // $500 USD (测试用)
+    hyperliquid: 1000   // $1,000 USD (测试用)
   };
 
   constructor() {
@@ -276,26 +276,25 @@ class WebSocketMonitor {
     protocolName: string
   ): Promise<void> {
     try {
-      // 简化的指令分析 - 实际应用中需要解析具体的指令数据
+      // 分析指令数据和账户变化来判断操作类型
       const instructionData = instruction.data;
 
-      // 根据指令数据的前几个字节判断操作类型
-      let action = '合约操作';
-      let actionIcon = '🔄';
+      // 分析账户余额变化来推断操作类型
+      const { action, actionIcon, side } = this.analyzeContractAction(tx, instruction, protocolName);
 
-      if (instructionData && instructionData.length > 0) {
-        const firstByte = instructionData[0];
+      console.log(`🔍 分析${protocolName}合约操作: ${action} (${side || '未知方向'})`);
 
-        // 这是简化的判断逻辑，实际需要根据具体协议的指令格式
-        if (firstByte === 0 || firstByte === 1) {
-          action = '开仓';
-          actionIcon = '📈🟢';
-        } else if (firstByte === 2 || firstByte === 3) {
-          action = '平仓';
-          actionIcon = '📉🔴';
-        } else if (firstByte === 4 || firstByte === 5) {
-          action = '交易';
-          actionIcon = '💱';
+      // 如果检测到明确的做多/做空操作，使用更具体的描述
+      let finalAction = action;
+      if (side) {
+        if (action.includes('开仓')) {
+          finalAction = side === 'long' ? '开多' : '开空';
+        } else if (action.includes('平仓')) {
+          finalAction = side === 'long' ? '平多' : '平空';
+        } else if (action.includes('增仓')) {
+          finalAction = side === 'long' ? '加仓做多' : '加仓做空';
+        } else if (action.includes('减仓')) {
+          finalAction = side === 'long' ? '减仓做多' : '减仓做空';
         }
       }
 
@@ -315,14 +314,104 @@ class WebSocketMonitor {
         const contractTxId = `SOL-CONTRACT-${signature}`;
 
         if (!this.transactionCache.has(contractTxId)) {
-          console.log(`🚨 检测到Solana大额合约交易: ${protocolName} ${action} ~$${formatAmount(estimatedValue)}`);
-          await this.sendSolanaContractAlert(signature, protocolName, action, estimatedValue, slot);
+          console.log(`🚨 检测到Solana大额合约交易: ${protocolName} ${finalAction} ~$${formatAmount(estimatedValue)}`);
+          await this.sendSolanaContractAlert(signature, protocolName, finalAction, estimatedValue, slot, side);
           this.addToCache(contractTxId);
         }
       }
 
     } catch (error) {
       console.warn('分析Solana合约指令失败:', error);
+    }
+  }
+
+  /**
+   * 分析合约操作类型和方向
+   */
+  private analyzeContractAction(tx: any, instruction: any, protocolName: string): {
+    action: string;
+    actionIcon: string;
+    side?: 'long' | 'short';
+  } {
+    try {
+      // 分析账户余额变化
+      const preBalances = tx.meta?.preBalances || [];
+      const postBalances = tx.meta?.postBalances || [];
+
+      let totalInflow = 0;
+      let totalOutflow = 0;
+
+      // 计算总的资金流入流出
+      for (let i = 0; i < Math.min(preBalances.length, postBalances.length); i++) {
+        const change = postBalances[i] - preBalances[i];
+        if (change > 0) {
+          totalInflow += change;
+        } else {
+          totalOutflow += Math.abs(change);
+        }
+      }
+
+      // 根据协议特征和资金流向判断操作类型
+      let action = '合约操作';
+      let actionIcon = '🔄';
+      let side: 'long' | 'short' | undefined;
+
+      // Drift Protocol 特殊处理
+      if (protocolName === 'Drift Protocol') {
+        const instructionData = instruction.data;
+        if (instructionData && instructionData.length > 0) {
+          // 根据指令数据的特征判断
+          const dataStr = Buffer.from(instructionData).toString('hex');
+
+          // 简化的模式匹配 - 实际应用中需要更精确的解析
+          if (dataStr.includes('01') || dataStr.includes('02')) {
+            action = '开仓';
+            actionIcon = '📈🟢';
+            // 根据资金流向判断多空
+            side = totalOutflow > totalInflow ? 'long' : 'short';
+          } else if (dataStr.includes('03') || dataStr.includes('04')) {
+            action = '平仓';
+            actionIcon = '📉🔴';
+            side = totalInflow > totalOutflow ? 'long' : 'short';
+          } else if (dataStr.includes('05') || dataStr.includes('06')) {
+            action = '调整仓位';
+            actionIcon = '🔄';
+            side = totalOutflow > totalInflow ? 'long' : 'short';
+          }
+        }
+      }
+
+      // Mango Markets 特殊处理
+      else if (protocolName === 'Mango Markets') {
+        if (totalOutflow > totalInflow * 2) {
+          action = '开仓';
+          actionIcon = '📈🟢';
+          side = 'long';
+        } else if (totalInflow > totalOutflow * 2) {
+          action = '平仓';
+          actionIcon = '📉🔴';
+          side = 'long';
+        }
+      }
+
+      // 其他协议的通用判断
+      else {
+        if (totalOutflow > totalInflow) {
+          action = '开仓';
+          actionIcon = '📈🟢';
+          side = 'long';
+        } else if (totalInflow > totalOutflow) {
+          action = '平仓';
+          actionIcon = '📉🔴';
+          side = 'long';
+        }
+      }
+
+      return { action, actionIcon, side };
+
+    } catch (error) {
+      console.warn('分析合约操作失败:', error);
+      return { action: '合约操作', actionIcon: '🔄' };
     }
   }
 
@@ -751,7 +840,8 @@ class WebSocketMonitor {
     protocolName: string,
     action: string,
     estimatedValue: number,
-    slot: number
+    slot: number,
+    side?: 'long' | 'short'
   ): Promise<void> {
     const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Solana合约警报到频道: ${channelId}`);
@@ -761,9 +851,23 @@ class WebSocketMonitor {
       return;
     }
 
-    // 根据操作类型确定图标
+    // 根据操作类型和方向确定图标和描述
     let actionIcon = '🔄';
-    if (action.includes('开仓')) {
+    let directionText = '';
+
+    if (side) {
+      directionText = side === 'long' ? ' (做多 📈)' : ' (做空 📉)';
+    }
+
+    if (action.includes('开多')) {
+      actionIcon = '📈🟢';
+    } else if (action.includes('开空')) {
+      actionIcon = '📉🔴';
+    } else if (action.includes('平多')) {
+      actionIcon = '📈⚪';
+    } else if (action.includes('平空')) {
+      actionIcon = '📉⚪';
+    } else if (action.includes('开仓')) {
       actionIcon = '📈🟢';
     } else if (action.includes('平仓')) {
       actionIcon = '📉🔴';
@@ -774,7 +878,7 @@ class WebSocketMonitor {
     const message = `
 🟣 *SOLANA 大额合约交易警报* 🟣
 ━━━━━━━━━━━━━━━━━━━━━
-${actionIcon} 操作: *${action}*
+${actionIcon} 操作: *${action}${directionText}*
 🏛️ 协议: ${protocolName}
 💰 估算金额: *~$${formatAmount(estimatedValue)}*
 🔗 [查看交易](https://solscan.io/tx/${signature})

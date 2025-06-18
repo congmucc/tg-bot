@@ -59,16 +59,18 @@ class BinanceApi implements ICexApi {
       if (baseTokenSymbol.toUpperCase() === 'USDC') {
         try {
           console.log(`[Binance] USDC交易对可能不存在，尝试使用USDT交易对...`);
-          const usdtResult = await this.getTokenPrice(tokenSymbol, 'USDT');
-          
-          if (usdtResult.success && usdtResult.price !== undefined) {
+          const usdtSymbol = this.formatTradingPair(tokenSymbol, 'USDT');
+          const usdtResponse = await this.http.get('/api/v3/ticker/price', { params: { symbol: usdtSymbol } });
+
+          if (usdtResponse.status === 200 && usdtResponse.data && usdtResponse.data.price) {
+            const price = parseFloat(usdtResponse.data.price);
             // USDT和USDC通常接近1:1，直接返回
-            console.log(`[Binance] 使用USDT价格作为USDC价格: ${usdtResult.price}`);
+            console.log(`[Binance] 使用USDT价格作为USDC价格: ${price}`);
             return {
               exchange: this.getName(),
               exchangeType: this.getType(),
               success: true,
-              price: usdtResult.price,
+              price: price,
               timestamp: Date.now()
             };
           }
@@ -81,7 +83,7 @@ class BinanceApi implements ICexApi {
       const symbol = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
       
       // 调用Binance API获取价格
-      const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
+      const response = await this.http.get('/api/v3/ticker/price', { params: { symbol: symbol } });
       
       if (response.status === 200 && response.data && response.data.price) {
         const price = parseFloat(response.data.price);
@@ -151,7 +153,7 @@ class BinanceApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const symbol = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
+          const response = await this.http.get('/api/v3/ticker/price', { params: { symbol: symbol } });
           if (response.status === 200 && response.data && response.data.price) {
             return true;
           }
@@ -176,7 +178,7 @@ class BinanceApi implements ICexApi {
   public async get24hPriceChange(tokenSymbol: string, baseTokenSymbol: string): Promise<any> {
     try {
       const symbol = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
-      const response = await this.http.get('/api/v3/ticker/price', { symbol: symbol });
+      const response = await this.http.get('/api/v3/ticker/price', { params: { symbol: symbol } });
       
       if (response.status === 200 && response.data) {
         return {

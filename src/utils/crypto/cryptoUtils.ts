@@ -8,7 +8,7 @@ import { API_CONFIG } from '../../config/env';
 export async function getFearAndGreedIndex() {
   try {
     const http = HttpClient.create();
-    const response = await http.get('https://api.alternative.me/fng/', undefined, {
+    const response = await http.get('https://api.alternative.me/fng/', {
       timeout: 5000 // 5秒超时
     });
     
@@ -43,8 +43,10 @@ export async function getCryptoPrices(symbols = ['BTC', 'ETH', 'BNB'], currencie
     const currenciesStr = currencies.join(',');
     
     const response = await http.get('/simple/price', {
-      ids: symbolsStr.toLowerCase(),
-      vs_currencies: currenciesStr.toLowerCase()
+      params: {
+        ids: symbolsStr.toLowerCase(),
+        vs_currencies: currenciesStr.toLowerCase()
+      }
     });
     
     return response.data;
@@ -65,9 +67,11 @@ export async function getHistoricalPrices(symbol: string, days = 7, currency = '
   try {
     const http = HttpClient.create(API_CONFIG.COINGECKO_API);
     const response = await http.get(`/coins/${symbol.toLowerCase()}/market_chart`, {
-      vs_currency: currency,
-      days: days,
-      interval: days > 30 ? 'daily' : 'hourly'
+      params: {
+        vs_currency: currency,
+        days: days,
+        interval: days > 30 ? 'daily' : 'hourly'
+      }
     });
     
     return response.data;

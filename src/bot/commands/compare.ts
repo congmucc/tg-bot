@@ -2,6 +2,7 @@ import { Context } from 'telegraf';
 import { getPriceAcrossDexes } from '../../api/dex';
 import { isValidToken, resolveToken } from '../../services/tokenResolver';
 import jupiterAggregator from '../../api/aggregators/jupiterAggregator';
+import HttpClient from '../../utils/http/httpClient';
 import { formatTokenPrice } from '../../services/price';
 import { getPriceFromCexes, CexPriceResult } from '../../api/cex';
 
@@ -32,6 +33,7 @@ interface PriceInfo {
   chain: string;
   price: number;
   isOutlier: boolean;
+  category?: string;
 }
 
 /**
@@ -100,62 +102,280 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
       return;
     }
     
-    const waitingMsg = await ctx.reply(`正在获取 ${tokenInfo.symbol} (${tokenInfo.name}) 在不同平台上的数据...`);
-    
-    // 并行获取所有价格数据
+    const waitingMsg = await ctx.reply(`🔄 正在并发查询 ${tokenInfo.symbol} (${tokenInfo.name}) 在多个平台的价格...\n\n⏱️ 预计需要15-20秒，正在尝试更多API...`);
+
+    // 并行获取所有价格数据 - 真正的并发查询
+    console.log(`🚀 开始并发查询: DEX + CEX + Jupiter + 聚合器`);
+    const startTime = Date.now();
+
     // 1. 获取DEX价格
     const dexPromise: Promise<DexPriceResult[]> = getPriceAcrossDexes(tokenSymbol, baseTokenSymbol);
-    
+
     // 2. 获取CEX价格
     const cexPromise: Promise<CexPriceResult[]> = getPriceFromCexes(tokenSymbol, baseTokenSymbol);
+
+    // 3. 获取聚合器价格 (CoinGecko, CryptoCompare, CoinCap)
+    const aggregatorPromise: Promise<any[]> = (async () => {
+      const results = [];
+      const httpClient = new HttpClient();
+
+      // CoinGecko直接价格
+      try {
+        console.log(`[CoinGecko] 开始查询...`);
+        console.log(`[CoinGecko] 查询参数: ids=${tokenInfo.id}, vs_currencies=${baseTokenSymbol.toLowerCase()}`);
+
+        const response = await httpClient.get(`https://api.coingecko.com/api/v3/simple/price`, {
+          params: {
+            ids: tokenInfo.id || tokenInfo.symbol.toLowerCase(),
+            vs_currencies: baseTokenSymbol.toLowerCase(),
+            include_24hr_change: true
+          },
+          timeout: 30000 // 增加超时时间
+        });
+
+        console.log(`[CoinGecko] 响应数据:`, JSON.stringify(response.data, null, 2));
+
+        const tokenId = tokenInfo.id || tokenInfo.symbol.toLowerCase();
+        if (response.data && response.data[tokenId]) {
+          // 检查USDC价格
+          if (response.data[tokenId][baseTokenSymbol.toLowerCase()]) {
+            const price = response.data[tokenId][baseTokenSymbol.toLowerCase()];
+            console.log(`✅ [CoinGecko] 成功: $${price}`);
+            results.push({
+              source: 'CoinGecko',
+              success: true,
+              price: price
+            });
+          }
+          // 如果没有USDC，尝试USD价格
+          else if (response.data[tokenId]['usd']) {
+            const price = response.data[tokenId]['usd'];
+            console.log(`✅ [CoinGecko] 成功 (USD): $${price}`);
+            results.push({
+              source: 'CoinGecko',
+              success: true,
+              price: price
+            });
+          } else {
+            console.log(`❌ [CoinGecko] 未找到${baseTokenSymbol}或USD价格`);
+            results.push({
+              source: 'CoinGecko',
+              success: false,
+              error: `未找到${baseTokenSymbol}或USD价格`
+            });
+          }
+        } else {
+          console.log(`❌ [CoinGecko] 响应格式不正确或未找到代币数据`);
+          results.push({
+            source: 'CoinGecko',
+            success: false,
+            error: '未找到代币数据'
+          });
+        }
+      } catch (error: any) {
+        console.log(`❌ [CoinGecko] 失败: ${error.message}`);
+        results.push({
+          source: 'CoinGecko',
+          success: false,
+          error: error.message
+        });
+      }
+
+      // CryptoCompare
+      try {
+        console.log(`[CryptoCompare] 开始查询...`);
+        const response = await httpClient.get(`https://min-api.cryptocompare.com/data/price`, {
+          params: {
+            fsym: tokenSymbol,
+            tsyms: baseTokenSymbol
+          },
+          timeout: 60000
+        });
+
+        if (response.data && response.data[baseTokenSymbol]) {
+          const price = response.data[baseTokenSymbol];
+          console.log(`✅ [CryptoCompare] 成功: $${price}`);
+          results.push({
+            source: 'CryptoCompare',
+            success: true,
+            price: price
+          });
+        }
+      } catch (error: any) {
+        console.log(`❌ [CryptoCompare] 失败: ${error.message}`);
+        results.push({
+          source: 'CryptoCompare',
+          success: false,
+          error: error.message
+        });
+      }
+
+      // CoinCap - 修复API端点
+      try {
+        console.log(`[CoinCap] 开始查询...`);
+
+        // 使用搜索API查找代币
+        console.log(`[CoinCap] 搜索代币: ${tokenSymbol}`);
+
+        const response = await httpClient.get(`https://api.coincap.io/v2/assets`, {
+          params: {
+            search: tokenSymbol,
+            limit: 10
+          },
+          timeout: 60000
+        });
+
+        console.log(`[CoinCap] 响应状态: ${response.status}`);
+        console.log(`[CoinCap] 搜索结果数量: ${response.data?.data?.length || 0}`);
+
+        if (response.data && response.data.data && response.data.data.length > 0) {
+          // 查找匹配的代币
+          const tokenData = response.data.data.find((item: any) =>
+            item.symbol.toUpperCase() === tokenSymbol.toUpperCase()
+          );
+
+          if (tokenData && tokenData.priceUsd) {
+            const price = parseFloat(tokenData.priceUsd);
+            console.log(`✅ [CoinCap] 成功: $${price} (ID: ${tokenData.id})`);
+            results.push({
+              source: 'CoinCap',
+              success: true,
+              price: price
+            });
+          } else {
+            console.log(`❌ [CoinCap] 未找到匹配的代币: ${tokenSymbol}`);
+            console.log(`[CoinCap] 可用代币:`, response.data.data.map((item: any) => `${item.symbol}(${item.name})`).slice(0, 3));
+            results.push({
+              source: 'CoinCap',
+              success: false,
+              error: `未找到匹配的代币: ${tokenSymbol}`
+            });
+          }
+        } else {
+          console.log(`❌ [CoinCap] 搜索结果为空`);
+          results.push({
+            source: 'CoinCap',
+            success: false,
+            error: '搜索结果为空'
+          });
+        }
+      } catch (error: any) {
+        console.log(`❌ [CoinCap] 失败: ${error.message}`);
+        results.push({
+          source: 'CoinCap',
+          success: false,
+          error: error.message
+        });
+      }
+
+      return results;
+    })();
     
-    // 3. 获取Jupiter价格
+    // 4. 获取Jupiter价格 - 带超时
     const jupiterPromise: Promise<JupiterPriceResult> = (async () => {
       try {
-        const jupiterPriceResult = await jupiterAggregator.getTokenPrice(tokenSymbol, baseTokenSymbol);
+        console.log(`[Jupiter] 开始查询...`);
+
+        // 为Jupiter设置60秒超时
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Jupiter查询超时')), 60000)
+        );
+
+        const jupiterPriceResult = await Promise.race([
+          jupiterAggregator.getTokenPrice(tokenSymbol, baseTokenSymbol),
+          timeoutPromise
+        ]);
+
         if (jupiterPriceResult.success && jupiterPriceResult.price !== undefined) {
-          console.log(`[Jupiter] 获取的价格: ${jupiterPriceResult.price}`);
+          console.log(`✅ [Jupiter] 成功: ${jupiterPriceResult.price}`);
           return {
             success: true,
             price: jupiterPriceResult.price
           };
         }
+        console.log(`❌ [Jupiter] 失败: 未找到价格`);
         return { success: false };
-      } catch (error) {
-        console.error('Jupiter价格查询失败:', error);
+      } catch (error: any) {
+        console.log(`❌ [Jupiter] 异常: ${error.message}`);
         return { success: false };
       }
     })();
     
-    // 等待所有价格查询完成
-    const results = await Promise.all([dexPromise, cexPromise, jupiterPromise]);
-    const pricesAcrossDexes = results[0];
-    const pricesAcrossCexes = results[1];
-    const jupiterResult = results[2];
-    
-    // 如果Jupiter查询成功，将其添加到价格列表中
-    if (jupiterResult.success && jupiterResult.price !== undefined) {
-      pricesAcrossDexes.push({
-        dex: 'jupiter',
-        chain: 'jupiter_aggregator', // 独立分类
-        success: true,
-        price: jupiterResult.price.toString()
-      });
-    }
-    
-    // 将CEX价格添加到结果中
-    for (const cexResult of pricesAcrossCexes) {
-      if (cexResult.success && cexResult.price !== undefined) {
-        pricesAcrossDexes.push({
-          dex: cexResult.exchange,
-          chain: 'centralized', // 中心化交易所
-          success: true,
-          price: cexResult.price.toString()
+    // 等待所有价格查询完成 - 使用Promise.allSettled避免单个失败影响整体
+    console.log(`🔄 等待所有价格查询完成...`);
+    const results = await Promise.allSettled([dexPromise, cexPromise, aggregatorPromise, jupiterPromise]);
+
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(1);
+    console.log(`⏱️ 所有查询完成，耗时: ${duration}秒`);
+
+    const pricesAcrossDexes = results[0].status === 'fulfilled' ? results[0].value : [];
+    const pricesAcrossCexes = results[1].status === 'fulfilled' ? results[1].value : [];
+    const aggregatorResults = results[2].status === 'fulfilled' ? results[2].value : [];
+    const jupiterResult = results[3].status === 'fulfilled' ? results[3].value : { success: false };
+
+    // 重新组织数据结构 - 分为三个独立的分类
+    const allPrices: PriceInfo[] = [];
+
+    // 1. DEX价格
+    const dexPrices: PriceInfo[] = [];
+    pricesAcrossDexes.forEach(result => {
+      if (result.success && result.price) {
+        dexPrices.push({
+          dex: result.dex,
+          chain: result.chain,
+          price: parseFloat(result.price),
+          isOutlier: false,
+          category: 'DEX'
         });
       }
+    });
+
+    // 2. CEX价格
+    const cexPrices: PriceInfo[] = [];
+    pricesAcrossCexes.forEach(result => {
+      if (result.success && result.price !== undefined) {
+        cexPrices.push({
+          dex: result.exchange,
+          chain: 'centralized',
+          price: result.price,
+          isOutlier: false,
+          category: 'CEX'
+        });
+      }
+    });
+
+    // 3. 聚合器价格
+    const aggregatorPrices: PriceInfo[] = [];
+
+    // 添加聚合器结果
+    aggregatorResults.forEach((result: any) => {
+      if (result.success && result.price !== undefined) {
+        aggregatorPrices.push({
+          dex: result.source,
+          chain: 'aggregator',
+          price: result.price,
+          isOutlier: false,
+          category: '聚合器'
+        });
+      }
+    });
+
+    // 添加Jupiter结果到聚合器
+    if (jupiterResult.success && jupiterResult.price !== undefined) {
+      aggregatorPrices.push({
+        dex: 'Jupiter',
+        chain: 'aggregator',
+        price: jupiterResult.price,
+        isOutlier: false,
+        category: '聚合器'
+      });
     }
-    
-    if (pricesAcrossDexes.length === 0) {
+
+    // 合并所有价格用于异常值检测
+    allPrices.push(...dexPrices, ...cexPrices, ...aggregatorPrices);
+
+    if (allPrices.length === 0) {
       await ctx.telegram.editMessageText(
         waitingMsg.chat.id,
         waitingMsg.message_id,
@@ -164,143 +384,76 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
       );
       return;
     }
-    
-    // 处理成功的价格数据
-    const successfulPrices = pricesAcrossDexes.filter(result => result.success);
-    
-    // 检测价格异常值
-    const priceInfos: PriceInfo[] = successfulPrices.map(result => ({
-      dex: result.dex,
-      chain: result.chain,
-      price: parseFloat(result.price || '0'),
-      isOutlier: false
-    }));
-    
+
     // 标记异常值
-    detectOutliers(priceInfos);
+    detectOutliers(allPrices);
     
     // 构建价格比较消息
     let resultMessage = `📊 *${tokenSymbol}/${baseTokenSymbol} 交易平台价格聚合*\n---------------------\n`;
-    
+
     // 添加代币信息
     resultMessage += `*代币信息:* ${tokenInfo.name} (${tokenInfo.source === 'coingecko' ? 'coingecko' : tokenInfo.source})\n`;
-    
+
     // 更清晰地显示支持的交易平台
     resultMessage += `*数据来源:*\n`;
-    
-    // 为不同链上的DEX进行分组，同时过滤掉异常值
-    const jupiterDex = priceInfos.filter(p => p.chain === 'jupiter_aggregator');
-    const ethereumDexes = priceInfos.filter(p => p.chain === 'ethereum');
-    const solanaDexes = priceInfos.filter(p => p.chain === 'solana');
-    const bscDexes = priceInfos.filter(p => p.chain === 'bsc');
-    const zkSyncDexes = priceInfos.filter(p => p.chain === 'zksync');
-    const cexes = priceInfos.filter(p => p.chain === 'centralized');
-    
-    // Jupiter聚合器（单独分类）
-    if (jupiterDex.length > 0) {
-      resultMessage += `\n🔹 *Jupiter加密货币聚合器:*\n`;
-      for (const jup of jupiterDex) {
-        const jupName = jup.dex.charAt(0).toUpperCase() + jup.dex.slice(1);
-        let priceText = formatTokenPrice(jup.price, baseTokenSymbol);
-        
-        // 如果是异常值，标记出来
-        if (jup.isOutlier) {
-          priceText += ` ⚠️`;
-        }
-        
-        resultMessage += `  • ${jupName}: ${priceText} ${baseTokenSymbol}${jup.isOutlier ? ' (可能不准确)' : ''}\n`;
-      }
-    }
-    
-    // 以太坊链
-    if (ethereumDexes.length > 0) {
-      resultMessage += `\n🔹 *以太坊DEX:*\n`;
-      for (const dex of ethereumDexes) {
+
+    // 1. DEX分类
+    if (dexPrices.length > 0) {
+      resultMessage += `\n🔹 *去中心化交易所(DEX):*\n`;
+      for (const dex of dexPrices) {
         const dexName = dex.dex.charAt(0).toUpperCase() + dex.dex.slice(1);
         let priceText = formatTokenPrice(dex.price, baseTokenSymbol);
-        
+
         // 如果是异常值，标记出来
         if (dex.isOutlier) {
           priceText += ` ⚠️`;
         }
-        
+
         resultMessage += `  • ${dexName}: ${priceText} ${baseTokenSymbol}${dex.isOutlier ? ' (可能不准确)' : ''}\n`;
       }
     }
-    
-    // Solana链
-    if (solanaDexes.length > 0) {
-      resultMessage += `\n🔹 *Solana DEX:*\n`;
-      for (const dex of solanaDexes) {
-        const dexName = dex.dex.charAt(0).toUpperCase() + dex.dex.slice(1);
-        let priceText = formatTokenPrice(dex.price, baseTokenSymbol);
-        
-        // 如果是异常值，标记出来
-        if (dex.isOutlier) {
-          priceText += ` ⚠️`;
-        }
-        
-        resultMessage += `  • ${dexName}: ${priceText} ${baseTokenSymbol}${dex.isOutlier ? ' (可能不准确)' : ''}\n`;
-      }
-    }
-    
-    // BSC链
-    if (bscDexes.length > 0) {
-      resultMessage += `\n🔹 *BSC DEX:*\n`;
-      for (const dex of bscDexes) {
-        const dexName = dex.dex.charAt(0).toUpperCase() + dex.dex.slice(1);
-        let priceText = formatTokenPrice(dex.price, baseTokenSymbol);
-        
-        // 如果是异常值，标记出来
-        if (dex.isOutlier) {
-          priceText += ` ⚠️`;
-        }
-        
-        resultMessage += `  • ${dexName}: ${priceText} ${baseTokenSymbol}${dex.isOutlier ? ' (可能不准确)' : ''}\n`;
-      }
-    }
-    
-    // zkSync生态
-    if (zkSyncDexes.length > 0) {
-      resultMessage += `\n🔹 *zkSync DEX:*\n`;
-      for (const dex of zkSyncDexes) {
-        const dexName = dex.dex.charAt(0).toUpperCase() + dex.dex.slice(1);
-        let priceText = formatTokenPrice(dex.price, baseTokenSymbol);
-        
-        // 如果是异常值，标记出来
-        if (dex.isOutlier) {
-          priceText += ` ⚠️`;
-        }
-        
-        resultMessage += `  • ${dexName}: ${priceText} ${baseTokenSymbol}${dex.isOutlier ? ' (可能不准确)' : ''}\n`;
-      }
-    }
-    
-    // 中心化交易所
-    if (cexes.length > 0) {
+
+    // 2. CEX分类
+    if (cexPrices.length > 0) {
       resultMessage += `\n🔹 *中心化交易所(CEX):*\n`;
-      for (const cex of cexes) {
+      for (const cex of cexPrices) {
         const cexName = cex.dex.charAt(0).toUpperCase() + cex.dex.slice(1);
         let priceText = formatTokenPrice(cex.price, baseTokenSymbol);
-        
+
         // 如果是异常值，标记出来
         if (cex.isOutlier) {
           priceText += ` ⚠️`;
         }
-        
+
         resultMessage += `  • ${cexName}: ${priceText} ${baseTokenSymbol}${cex.isOutlier ? ' (可能不准确)' : ''}\n`;
+      }
+    }
+
+    // 3. 聚合器分类
+    if (aggregatorPrices.length > 0) {
+      resultMessage += `\n🔹 *价格聚合器:*\n`;
+      for (const aggregator of aggregatorPrices) {
+        const aggregatorName = aggregator.dex.charAt(0).toUpperCase() + aggregator.dex.slice(1);
+        let priceText = formatTokenPrice(aggregator.price, baseTokenSymbol);
+
+        // 如果是异常值，标记出来
+        if (aggregator.isOutlier) {
+          priceText += ` ⚠️`;
+        }
+
+        resultMessage += `  • ${aggregatorName}: ${priceText} ${baseTokenSymbol}${aggregator.isOutlier ? ' (可能不准确)' : ''}\n`;
       }
     }
     
     // 如果有多个成功的价格，计算价格差异
     // 过滤掉异常值再进行比较
-    const normalPrices = priceInfos.filter(p => !p.isOutlier);
-    
+    const normalPrices = allPrices.filter(p => !p.isOutlier);
+
     if (normalPrices.length > 1) {
       // 找到最高和最低价格
       let minPrice = { dex: '', price: Infinity };
       let maxPrice = { dex: '', price: 0 };
-      
+
       for (const result of normalPrices) {
         const price = result.price;
         if (price < minPrice.price) {
@@ -310,25 +463,25 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
           maxPrice = { dex: result.dex, price };
         }
       }
-      
+
       // 计算价格差异百分比
       const priceDiff = maxPrice.price - minPrice.price;
       const priceDiffPct = (priceDiff / minPrice.price) * 100;
-      
+
       resultMessage += `\n📈 *套利分析*\n`;
       resultMessage += `最低: ${minPrice.dex.charAt(0).toUpperCase() + minPrice.dex.slice(1)} (${formatTokenPrice(minPrice.price, baseTokenSymbol)} ${baseTokenSymbol})\n`;
       resultMessage += `最高: ${maxPrice.dex.charAt(0).toUpperCase() + maxPrice.dex.slice(1)} (${formatTokenPrice(maxPrice.price, baseTokenSymbol)} ${baseTokenSymbol})\n`;
       resultMessage += `差异: ${priceDiffPct.toFixed(2)}%\n`;
-      
+
       if (priceDiffPct > 1) {
         resultMessage += `\n💰 *潜在套利机会!*\n`;
         resultMessage += `考虑在 ${minPrice.dex} 买入，在 ${maxPrice.dex} 卖出`;
       }
-    } else if (priceInfos.length > 1 && normalPrices.length <= 1) {
+    } else if (allPrices.length > 1 && normalPrices.length <= 1) {
       // 有多个价格但大部分是异常值
       resultMessage += `\n⚠️ *价格异常提示*\n`;
       resultMessage += `检测到价格数据中存在明显的不一致，已标记可能不准确的数据源。`;
-      
+
       // 如果正常价格只有一个，显示它作为参考
       if (normalPrices.length === 1) {
         const normalPrice = normalPrices[0];
@@ -340,9 +493,9 @@ export async function handleCompareCommand(ctx: Context): Promise<void> {
     } else {
       resultMessage += `\n⚠️ 未获取到可靠的价格数据，请尝试其他交易对或稍后再试。`;
     }
-    
+
     // 如果有异常值，添加说明
-    const outliers = priceInfos.filter(p => p.isOutlier);
+    const outliers = allPrices.filter(p => p.isOutlier);
     if (outliers.length > 0) {
       resultMessage += `\n\n📝 *注意*: ⚠️ 标记的价格与大多数数据源差异较大，可能不准确。`;
     }
@@ -377,17 +530,47 @@ function detectOutliers(prices: PriceInfo[]): void {
   
   // 2. 如果有足够的可信交易所数据，使用它们作为参考
   if (trustedPrices.length >= 2) {
-    // 计算可信交易所的平均价格
-    const trustedAvg = trustedPrices.reduce((sum, p) => sum + p.price, 0) / trustedPrices.length;
-    console.log(`[异常值检测] 可信交易所平均价格: ${trustedAvg}`);
-    
-    // 使用可信平均价格作为参考检测异常值
-    for (const priceInfo of prices) {
-      const deviation = Math.abs(priceInfo.price - trustedAvg) / trustedAvg;
-      // 如果与可信平均价格偏差超过25%，标记为异常
-      if (deviation > 0.25) {
-        priceInfo.isOutlier = true;
-        console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 与可信平均价 ${trustedAvg} 偏差 ${(deviation * 100).toFixed(2)}%, 标记为异常`);
+    // 先过滤掉明显异常的价格（比如相差100倍以上的）
+    const filteredTrustedPrices = trustedPrices.filter(p => {
+      const otherPrices = trustedPrices.filter(other => other !== p);
+      if (otherPrices.length === 0) return true;
+
+      const avgOthers = otherPrices.reduce((sum, other) => sum + other.price, 0) / otherPrices.length;
+      const ratio = Math.max(p.price / avgOthers, avgOthers / p.price);
+      return ratio < 10; // 过滤掉相差10倍以上的价格
+    });
+
+    if (filteredTrustedPrices.length >= 2) {
+      // 计算过滤后的可信交易所平均价格
+      const trustedAvg = filteredTrustedPrices.reduce((sum, p) => sum + p.price, 0) / filteredTrustedPrices.length;
+      console.log(`[异常值检测] 可信交易所平均价格: ${trustedAvg} (使用${filteredTrustedPrices.length}个可信价格)`);
+
+      // 使用可信平均价格作为参考检测异常值
+      for (const priceInfo of prices) {
+        const deviation = Math.abs(priceInfo.price - trustedAvg) / trustedAvg;
+        // 如果与可信平均价格偏差超过25%，标记为异常
+        if (deviation > 0.25) {
+          priceInfo.isOutlier = true;
+          console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 与可信平均价 ${trustedAvg} 偏差 ${(deviation * 100).toFixed(2)}%, 标记为异常`);
+        }
+      }
+    } else {
+      // 如果过滤后可信价格不够，使用中位数方法
+      console.log(`[异常值检测] 可信价格过滤后不足，使用中位数方法`);
+      const priceValues = prices.map(p => p.price).sort((a, b) => a - b);
+      const mid = Math.floor(priceValues.length / 2);
+      const median = priceValues.length % 2 === 0
+        ? (priceValues[mid - 1] + priceValues[mid]) / 2
+        : priceValues[mid];
+
+      console.log(`[异常值检测] 中位数价格: ${median}`);
+
+      for (const priceInfo of prices) {
+        const deviation = Math.abs(priceInfo.price - median) / median;
+        if (deviation > 0.3 || priceInfo.price / median > 100 || median / priceInfo.price > 100) {
+          priceInfo.isOutlier = true;
+          console.log(`[异常值检测] 价格 ${priceInfo.price} 来自 ${priceInfo.dex} 被标记为异常值 (中位数: ${median}, 偏差: ${(deviation * 100).toFixed(2)}%)`);
+        }
       }
     }
   } else {

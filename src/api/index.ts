@@ -10,7 +10,7 @@ export * from './interfaces/exchangeApi';
 import binanceApi from './cex/binanceApi';
 import okxApi from './cex/okxApi';
 import coinbaseApi from './cex/coinbaseApi';
-import krakenApi from './cex/krakenApi';
+
 import huobiApi from './cex/huobiApi';
 import cexManager from './cex';
 
@@ -37,7 +37,6 @@ export const cexApis: Record<string, any> = {
   binance: binanceApi,
   okx: okxApi,
   coinbase: coinbaseApi,
-  kraken: krakenApi,
   huobi: huobiApi
 };
 

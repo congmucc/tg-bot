@@ -99,7 +99,7 @@ class HuobiApi implements ICexApi {
       const symbol = this.formatTradingPair(tokenSymbol, baseTokenSymbol);
       
       // 调用Huobi API获取价格
-      const response = await this.http.get('/market/detail/merged', { symbol: symbol });
+      const response = await this.http.get('/market/detail/merged', { params: { symbol: symbol } });
       
       if (response.status === 200 && response.data && response.data.status === 'ok' && response.data.tick) {
         // Huobi API返回的结构中close是最新价格
@@ -149,7 +149,7 @@ class HuobiApi implements ICexApi {
       for (const baseToken of baseTokens) {
         const symbol = this.formatTradingPair(tokenSymbol, baseToken);
         try {
-          const response = await this.http.get('/market/detail/merged', { symbol: symbol });
+          const response = await this.http.get('/market/detail/merged', { params: { symbol: symbol } });
           if (response.status === 200 && response.data && response.data.status === 'ok') {
             return true;
           }

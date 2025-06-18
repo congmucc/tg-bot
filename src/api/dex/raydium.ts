@@ -249,40 +249,77 @@ export class RaydiumAPI implements IDexApi {
       // 处理SOL/WSOL转换
       const normalizedTokenSymbol = this.normalizeTokenSymbol(tokenSymbol);
       const normalizedBaseSymbol = this.normalizeTokenSymbol(baseTokenSymbol);
-      
+
       // 获取代币地址
       const tokenAddress = await this.getTokenAddress(normalizedTokenSymbol);
       const baseTokenAddress = await this.getTokenAddress(normalizedBaseSymbol);
-      
+
       if (!tokenAddress || !baseTokenAddress) {
         console.log(`[Raydium] 未找到代币地址: ${normalizedTokenSymbol} 或 ${normalizedBaseSymbol}`);
         return null;
       }
-      
+
       console.log(`[Raydium] 代币地址: ${normalizedTokenSymbol}=${tokenAddress}, ${normalizedBaseSymbol}=${baseTokenAddress}`);
-      
-      // 使用Jupiter Price API
-      const jupiterPriceUrl = `${API_CONFIG.JUPITER_PRICE_API}?ids=${tokenAddress}&vsToken=${baseTokenAddress}`;
-      console.log(`[Raydium] Jupiter Price API URL: ${jupiterPriceUrl}`);
-      
-      const response = await axios.get(jupiterPriceUrl);
-      
-      if (response.data && response.data.data && response.data.data[tokenAddress]) {
-        console.log(`[Raydium] Jupiter Price API 返回价格: ${response.data.data[tokenAddress].price}`);
-        return parseFloat(response.data.data[tokenAddress].price);
-      } else if (response.data && response.data.price) {
-        console.log(`[Raydium] Jupiter Price API 返回价格: ${response.data.price}`);
-        return parseFloat(response.data.price);
+
+      // 尝试多个Jupiter API端点
+      const jupiterApis = [
+        `${API_CONFIG.JUPITER_PRICE_API}?ids=${tokenAddress}&vsToken=${baseTokenAddress}`,
+        `https://lite-api.jup.ag/price/v2?ids=${tokenAddress}&vsToken=${baseTokenAddress}`,
+        `https://quote-api.jup.ag/v6/quote?inputMint=${tokenAddress}&outputMint=${baseTokenAddress}&amount=1000000000`
+      ];
+
+      for (const apiUrl of jupiterApis) {
+        try {
+          console.log(`[Raydium] 尝试Jupiter API: ${apiUrl}`);
+
+          const response = await axios.get(apiUrl, {
+            timeout: 10000,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; DeFi-Bot/1.0)',
+              'Accept': 'application/json'
+            }
+          });
+
+          // 处理不同API端点的响应格式
+          if (response.data) {
+            let price = null;
+
+            // Jupiter Price API v2 格式
+            if (response.data.data && response.data.data[tokenAddress]) {
+              price = parseFloat(response.data.data[tokenAddress].price);
+            }
+            // 旧版格式
+            else if (response.data.price) {
+              price = parseFloat(response.data.price);
+            }
+            // Quote API格式
+            else if (response.data.outAmount && response.data.inAmount) {
+              const outAmount = parseFloat(response.data.outAmount);
+              const inAmount = parseFloat(response.data.inAmount);
+              price = outAmount / inAmount;
+            }
+
+            if (price && price > 0) {
+              console.log(`[Raydium] Jupiter API 返回价格: ${price}`);
+              return price;
+            }
+          }
+        } catch (apiError) {
+          console.log(`[Raydium] Jupiter API ${apiUrl} 失败，尝试下一个...`);
+          continue;
+        }
       }
-      
-      console.log(`[Raydium] Jupiter Price API 响应: ${JSON.stringify(response.data)}`);
+
+
+      console.log(`[Raydium] 所有Jupiter API都失败了`);
       return null;
+
     } catch (error) {
       console.error(`[Raydium] 从Jupiter Price API获取价格失败:`, error);
       return null;
     }
   }
-  
+
   /**
    * 从Solana获取代币价格
    * @param tokenSymbol 代币符号
@@ -444,47 +481,47 @@ export class RaydiumAPI implements IDexApi {
       if (cachedAddress) {
         console.log(`[Raydium] 使用缓存的代币地址: ${symbol} -> ${cachedAddress}`);
         return cachedAddress;
-    }
-    
+      }
+
       // 尝试从token resolver获取
       const token = await resolveToken(symbol);
       if (token && token.address) {
         // 缓存结果
         this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
         return token.address;
-    }
-    
+      }
+
       // 如果是SOL，返回WSOL地址
       if (symbol.toUpperCase() === 'SOL' || symbol.toUpperCase() === 'WSOL') {
         const wsolAddress = 'So11111111111111111111111111111111111111112'; // WSOL地址
         this.tokenAddressCache.set('SOL', wsolAddress);
         this.tokenAddressCache.set('WSOL', wsolAddress);
         return wsolAddress;
-    }
+      }
     
       // 尝试从Jupiter API获取
-    try {
+      try {
         const response = await axios.get(API_CONFIG.JUPITER_TOKEN_LIST_API);
         if (response.data && Array.isArray(response.data)) {
-        const token = response.data.find((t: any) => 
+          const token = response.data.find((t: any) =>
             t.symbol && t.symbol.toUpperCase() === symbol.toUpperCase() ||
             t.name && t.name.toUpperCase() === symbol.toUpperCase()
-        );
-        
-        if (token && token.address) {
+          );
+
+          if (token && token.address) {
             // 缓存结果
             this.tokenAddressCache.set(symbol.toUpperCase(), token.address);
-          return token.address;
+            return token.address;
+          }
         }
-      }
-    } catch (error) {
+      } catch (error) {
         console.error(`[Raydium] 从Jupiter获取代币地址失败:`, error);
-    }
-    
+      }
+
       return null;
     } catch (error) {
       console.error(`[Raydium] 获取代币地址失败:`, error);
-    return null;
+      return null;
     }
   }
   

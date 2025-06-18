@@ -19,12 +19,12 @@ interface DexPriceResult {
 export type DexType = 'uniswap' | 'raydium' | '1inch';
 
 /**
- * DEX API集合
+ * DEX API集合 - 延长超时时间，让更多DEX有机会成功
  */
 const dexApis: Record<DexType, IDexApi> = {
-  uniswap: uniswapAPI,
-  raydium: raydiumAPI,
-  '1inch': oneInchApi
+  uniswap: uniswapAPI, // 延长超时时间
+  raydium: raydiumAPI,  // 延长超时时间
+  '1inch': oneInchApi   // 延长超时时间
 };
 
 /**
@@ -50,61 +50,94 @@ export async function isTokenSupported(symbol: string): Promise<boolean> {
  * @param baseTokenSymbol 基础代币符号
  * @returns 不同DEX上的价格结果
  */
+/**
+ * 创建带超时的Promise
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`请求超时 (${timeoutMs}ms)`)), timeoutMs)
+    )
+  ]);
+}
+
+/**
+ * 获取不同DEX上的价格 - 优化并发版本
+ * @param tokenSymbol 代币符号
+ * @param baseTokenSymbol 基础代币符号
+ * @returns 不同DEX上的价格结果
+ */
 export async function getPriceAcrossDexes(
   tokenSymbol: string,
   baseTokenSymbol = 'USDT'
 ): Promise<DexPriceResult[]> {
-  const results: DexPriceResult[] = [];
-  
   // 规范化代币符号
   const normalizedTokenSymbol = tokenSymbol.toUpperCase();
   const normalizedBaseTokenSymbol = baseTokenSymbol.toUpperCase();
-  
-  // 并行获取不同DEX上的价格
-  const promises = [];
-  
-  // 遍历所有DEX API并获取价格
-  for (const [dexName, dexApi] of Object.entries(dexApis)) {
-  promises.push(
-    (async () => {
-      try {
-          console.log(`尝试从${dexApi.getName()}获取 ${normalizedTokenSymbol}/${normalizedBaseTokenSymbol} 价格...`);
-          const priceResult = await dexApi.getTokenPrice(normalizedTokenSymbol, normalizedBaseTokenSymbol);
-          
-          if (priceResult.success && priceResult.price !== undefined) {
-            console.log(`[${dexApi.getName()}] 获取的价格: ${priceResult.price}`);
-            results.push({
-              dex: dexApi.getName(),
-              chain: dexApi.getBlockchain().toLowerCase(),
-              success: true,
-              price: priceResult.price.toString()
-            });
-          } else {
-            results.push({
-              dex: dexApi.getName(),
-              chain: dexApi.getBlockchain().toLowerCase(),
-              success: false,
-              error: priceResult.error || '未找到价格'
-            });
-        }
-      } catch (error) {
-        const err = error as Error;
-          console.error(`[${dexApi.getName()}] 获取价格失败:`, err.message);
-          results.push({
-            dex: dexApi.getName(),
-            chain: dexApi.getBlockchain().toLowerCase(),
-            success: false,
-            error: err.message
-          });
+
+  console.log(`🚀 并发查询${Object.keys(dexApis).length}个DEX的${normalizedTokenSymbol}/${normalizedBaseTokenSymbol}价格...`);
+
+  // 并发获取所有DEX价格，每个请求都有独立的超时
+  const promises = Object.entries(dexApis).map(async ([dexName, dexApi]) => {
+    try {
+      console.log(`[${dexApi.getName()}] 开始查询...`);
+
+      // 为每个DEX请求设置20秒超时（DEX通常比CEX慢）
+      const priceResult = await withTimeout(
+        dexApi.getTokenPrice(normalizedTokenSymbol, normalizedBaseTokenSymbol),
+        20000
+      );
+
+      if (priceResult.success && priceResult.price !== undefined) {
+        console.log(`✅ [${dexApi.getName()}] 成功: ${priceResult.price}`);
+        return {
+          dex: dexApi.getName(),
+          chain: dexApi.getBlockchain().toLowerCase(),
+          success: true,
+          price: priceResult.price.toString()
+        };
+      } else {
+        console.log(`❌ [${dexApi.getName()}] 失败: ${priceResult.error || '未找到价格'}`);
+        return {
+          dex: dexApi.getName(),
+          chain: dexApi.getBlockchain().toLowerCase(),
+          success: false,
+          error: priceResult.error || '未找到价格'
+        };
       }
-    })()
-  );
-  }
-  
-  // 等待所有价格查询完成
-  await Promise.all(promises);
-  
-  return results;
+    } catch (error: any) {
+      console.log(`❌ [${dexApi.getName()}] 异常: ${error.message}`);
+      return {
+        dex: dexApi.getName(),
+        chain: dexApi.getBlockchain().toLowerCase(),
+        success: false,
+        error: error.message
+      };
+    }
+  });
+
+  // 使用Promise.allSettled等待所有请求完成
+  const results = await Promise.allSettled(promises);
+
+  // 提取所有结果
+  const dexResults: DexPriceResult[] = results.map(result => {
+    if (result.status === 'fulfilled') {
+      return result.value;
+    } else {
+      return {
+        dex: 'unknown',
+        chain: 'unknown',
+        success: false,
+        error: result.reason?.message || '请求失败'
+      };
+    }
+  });
+
+  const successCount = dexResults.filter(r => r.success).length;
+  console.log(`📊 DEX查询完成: ${successCount}/${Object.keys(dexApis).length} 成功`);
+
+  return dexResults;
 }
 
 /**
@@ -135,7 +168,7 @@ class DexApiManager {
       raydium: raydiumAPI,
       '1inch': oneInchApi
     };
-    }
+  }
 }
 
 // 创建并导出实例

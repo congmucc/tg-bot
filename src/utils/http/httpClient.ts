@@ -33,9 +33,9 @@ export interface HttpResponse<T = any> {
 class HttpClient {
   public instance: AxiosInstance;
   public defaultOptions: HttpRequestOptions = {
-    timeout: 15000, // 默认15秒超时，增加超时时间
-    retry: 2, // 默认重试2次，增加重试次数
-    retryDelay: 2000, // 默认重试延迟2秒，增加延迟
+    timeout: 60000, // 默认60秒超时，大幅增加超时时间
+    retry: 3, // 默认重试3次，增加重试次数
+    retryDelay: 3000, // 默认重试延迟3秒，增加延迟
   };
   
   // 添加请求限流控制
