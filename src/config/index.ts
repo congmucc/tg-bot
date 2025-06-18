@@ -3,41 +3,24 @@ dotenv.config();
 
 // 环境变量类型声明
 export interface EnvConfig {
-  // Telegram配置
+  // Telegram配置 (必需)
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_CHAT_ID: string;
-  
-  // 以太坊API配置
-  ETHEREUM_RPC_URL: string;
-  ETHERSCAN_API_KEY: string;
-  
-  // Solana API配置
-  SOLANA_RPC_URL: string;
-  SOLSCAN_API_KEY: string;
-  
-  // DEX API配置
-  UNISWAP_GRAPH_URL: string;
-  RAYDIUM_API_URL: string;
-  
-  // Web3存储配置
-  IPFS_GATEWAY: string;
-  
-  // 价格API配置
-  CMC_API_KEY: string;
 
-  // Jupiter API URLs
-  JUPITER_API_URL: string;
-  JUPITER_TOKEN_LIST_URL: string;
+  // 鲸鱼监控配置
+  WHALE_MONITOR_ENABLED: boolean;
+  WHALE_MONITOR_INTERVAL: number;
+  WHALE_MONITOR_COOLDOWN: number;
+  WHALE_MONITOR_BATCH_SIZE: number;
 
-  // 其他配置
-  COINGECKO_API_URL: string;
-  SOLANA_TOKEN_LIST_URL: string;
-
-  // 缓存配置
+  // 服务器配置
+  PORT: number;
+  LOG_LEVEL: string;
   CACHE_TTL: number;
 
-  // 日志级别
-  LOG_LEVEL: string;
+  // 可选API密钥
+  ETHERSCAN_API_KEY: string;
+  SOLSCAN_API_KEY: string;
 }
 
 // DEX 配置
@@ -51,41 +34,24 @@ export interface DexConfig {
 
 // 从环境变量获取配置
 export const config: EnvConfig = {
-  // Telegram配置
+  // Telegram配置 (必需)
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || '',
-  
-  // 以太坊API配置
-  ETHEREUM_RPC_URL: process.env.ETHEREUM_RPC_URL || 'https://eth-mainnet.g.alchemy.com/v2/demo',
-  ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY || '',
-  
-  // Solana API配置
-  SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-  SOLSCAN_API_KEY: process.env.SOLSCAN_API_KEY || '',
-  
-  // DEX API配置
-  UNISWAP_GRAPH_URL: process.env.UNISWAP_GRAPH_URL || 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',
-  RAYDIUM_API_URL: process.env.RAYDIUM_API_URL || 'https://api.raydium.io/v2/main',
-  
-  // Web3存储配置
-  IPFS_GATEWAY: process.env.IPFS_GATEWAY || 'https://gateway.ipfs.io/ipfs',
-  
-  // 价格API配置
-  CMC_API_KEY: process.env.CMC_API_KEY || '',
 
-  // Jupiter API URLs
-  JUPITER_API_URL: process.env.JUPITER_API_URL || 'https://quote-api.jup.ag/v6',
-  JUPITER_TOKEN_LIST_URL: process.env.JUPITER_TOKEN_LIST_URL || 'https://token.jup.ag/all',
+  // 鲸鱼监控配置
+  WHALE_MONITOR_ENABLED: process.env.WHALE_MONITOR_ENABLED === 'true',
+  WHALE_MONITOR_INTERVAL: parseInt(process.env.WHALE_MONITOR_INTERVAL || '15'),
+  WHALE_MONITOR_COOLDOWN: parseInt(process.env.WHALE_MONITOR_COOLDOWN || '5'),
+  WHALE_MONITOR_BATCH_SIZE: parseInt(process.env.WHALE_MONITOR_BATCH_SIZE || '5'),
 
-  // 其他配置
-  COINGECKO_API_URL: process.env.COINGECKO_API_URL || 'https://api.coingecko.com/api/v3',
-  SOLANA_TOKEN_LIST_URL: process.env.SOLANA_TOKEN_LIST_URL || 'https://cdn.jsdelivr.net/gh/solana-labs/token-list@main/src/tokens/solana.tokenlist.json',
-  
-  // 缓存配置
-  CACHE_TTL: parseInt(process.env.CACHE_TTL || '3600'), // 默认缓存1小时
-  
-  // 日志级别
+  // 服务器配置
+  PORT: parseInt(process.env.PORT || '3000'),
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+  CACHE_TTL: parseInt(process.env.CACHE_TTL || '3600'),
+
+  // 可选API密钥
+  ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY || '',
+  SOLSCAN_API_KEY: process.env.SOLSCAN_API_KEY || '',
 };
 
 // DEX 配置信息

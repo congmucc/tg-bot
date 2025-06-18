@@ -185,7 +185,133 @@ yarn build && yarn start
 | `/compare [代币]` | 价格聚合 | `/compare ETH` | 多平台价格对比和套利分析 |
 | `/whale [阈值]` | 鲸鱼监控 | `/whale 10` | 监控大额交易，支持多链 |
 | `/fear` | 市场情绪 | `/fear` | 查看恐惧贪婪指数 |
+| `/trend [代币] [时间]` | 趋势分析 | `/trend BTC 7d` | 价格趋势和技术分析 |
+| `/track [链] [地址]` | 钱包跟踪 | `/track eth 0x...` | 跟踪钱包资产变化 |
 | `/help` | 帮助信息 | `/help` | 显示所有可用命令 |
+
+### 🚀 高级交易系统
+
+| 命令 | 功能 | 示例 | 说明 |
+|------|------|------|------|
+| `/trade [买/卖] [代币对] [数量]` | 智能市价单 | `/trade 买 ETH/USDC 0.5` | MEV保护的智能交易 |
+| `/trade limit [代币对] [价格] [数量]` | 限价单 | `/trade limit ETH/USDC 2500 0.5` | 设置目标价格交易 |
+| `/trade stop [代币对] [止损价] [数量]` | 止损单 | `/trade stop ETH/USDC 2300 0.5` | 风险控制止损 |
+| `/trade dca [代币对] [金额] [周期]` | DCA定投 | `/trade dca BTC/USDC 1000 7d` | 定期投资策略 |
+| `/trade twap [代币对] [金额] [批次] [间隔]` | TWAP分批 | `/trade twap ETH/USDC 500 5 30m` | 时间加权平均价格 |
+| `/trade analyze [代币对] [数量]` | 交易分析 | `/trade analyze ETH/USDC 1` | 深度交易分析 |
+| `/trade route [代币对] [金额]` | 路由分析 | `/trade route ETH/USDC 1000` | 最优路由分析 |
+| `/trade mev [代币对] [金额]` | MEV分析 | `/trade mev ETH/USDC 1` | MEV风险评估 |
+| `/trade tech [技术类型]` | 技术展示 | `/trade tech clmm` | DeFi前沿技术展示 |
+| `/trade defi` | 生态系统 | `/trade defi` | 完整DeFi技术栈 |
+
+### 🔔 钱包跟踪系统
+
+| 命令 | 功能 | 示例 | 说明 |
+|------|------|------|------|
+| `/track eth [地址] [名称]` | 添加ETH钱包 | `/track eth 0x742d... Vitalik` | 跟踪以太坊钱包资产 |
+| `/track sol [地址] [名称]` | 添加SOL钱包 | `/track sol 9WzDX... 大户` | 跟踪Solana钱包资产 |
+| `/track list` | 钱包列表 | `/track list` | 查看所有跟踪钱包 |
+| `/track view [ID]` | 钱包详情 | `/track view ABC123` | 查看钱包详细信息 |
+| `/track delete [ID]` | 删除钱包 | `/track delete ABC123` | 删除特定钱包 |
+
+## 🚀 高级交易功能详解
+
+### 🛡️ MEV保护机制
+我们的交易系统集成了先进的MEV（最大可提取价值）保护机制：
+
+- **🔒 私有内存池**: 高风险交易自动使用私有内存池，防止抢跑攻击
+- **⚡ 智能Gas优化**: 动态调整Gas费用，在速度和成本间找到最佳平衡
+- **⏰ 时间延迟执行**: 通过时间延迟避免三明治攻击
+- **🔄 分批交易**: 大额交易自动分批执行，降低价格冲击
+
+### 🗺️ 智能路由系统
+多DEX聚合路由，确保最优交易执行：
+
+- **📊 流动性分析**: 实时分析各DEX流动性深度
+- **💰 价格影响计算**: 精确计算交易对价格的影响
+- **⛽ Gas费用优化**: 平衡执行效率和交易成本
+- **🎯 最优路径**: 自动选择最佳交易路径组合
+
+### 📈 高级交易策略
+
+#### DCA定投策略
+```bash
+/trade dca BTC/USDC 1000 7d    # 每7天投资，总额1000 USDC
+/trade dca ETH/USDC 500 1w     # 每周投资，总额500 USDC
+```
+- 降低市场波动影响
+- 平均购买成本
+- 减少情绪化交易
+
+#### TWAP分批交易
+```bash
+/trade twap ETH/USDC 1000 5 30m    # 1000 USDC分5批，每30分钟执行一次
+/trade twap BTC/USDC 2000 10 1h    # 2000 USDC分10批，每小时执行一次
+```
+- 时间加权平均价格
+- 减少滑点损失
+- 避免MEV攻击
+
+#### 止损保护
+```bash
+/trade stop ETH/USDC 2300 0.5     # ETH价格跌破2300时卖出0.5个
+/trade stop BTC/USDC 45000 0.1    # BTC价格跌破45000时卖出0.1个
+```
+- 智能风险控制
+- 自动执行止损
+- 保护投资本金
+
+### 🔍 深度分析工具
+
+#### 交易前分析
+```bash
+/trade analyze ETH/USDC 1      # 分析1个ETH的交易
+```
+提供详细的交易分析报告：
+- 最优路由分配
+- MEV风险评估
+- Gas费用预估
+- 价格影响分析
+
+#### 路由优化分析
+```bash
+/trade route ETH/USDC 1000     # 分析1000 USDC的最优路由
+```
+显示智能路由策略：
+- 各DEX分配比例
+- 流动性深度对比
+- 价格影响评估
+- Gas费用分解
+
+#### MEV风险评估
+```bash
+/trade mev ETH/USDC 5          # 评估5个ETH交易的MEV风险
+```
+全面的MEV风险分析：
+- 抢跑攻击概率
+- 三明治攻击风险
+- 保护策略建议
+- 风险等级评分
+
+### 🎯 系统特色
+
+#### **🤖 智能交易系统**
+- **MEV保护**: 集成Flashbots、CoW Protocol等前沿MEV保护技术
+- **智能路由**: 支持15+主流DEX的最优路由分配算法
+- **意图驱动**: 实现声明式交易，用户只需表达交易意图
+- **跨链聚合**: 支持以太坊、Solana、Arbitrum等多链交易
+
+#### **🔍 实时监控系统**
+- **WebSocket监控**: 实时监控ETH、SOL、BTC、Hyperliquid大额交易
+- **钱包跟踪**: 支持多链钱包资产实时跟踪和余额查询
+- **价格聚合**: 整合10+交易所和DEX的实时价格数据
+- **技术分析**: 集成恐惧贪婪指数、趋势分析等技术指标
+
+#### **🚀 前沿技术展示**
+- **CLMM技术**: 展示Uniswap V3集中流动性做市机制
+- **Intent-Centric**: 演示意图驱动架构的交易执行
+- **Cross-Chain**: 实现THORChain等跨链原生交易技术
+- **DeFi生态**: 完整的DeFi技术栈知识展示
 
 ### 💡 使用技巧
 

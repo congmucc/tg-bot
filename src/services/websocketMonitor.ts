@@ -2,11 +2,11 @@ import WebSocket from 'ws';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { ethers } from 'ethers';
 import { Telegraf } from 'telegraf';
-import { API_CONFIG, BOT_CONFIG } from '../config/env';
+import { config } from '../config';
 import { formatAmount, shortenAddress } from '../utils/format';
 
 // 创建bot实例用于发送消息
-const bot = new Telegraf(BOT_CONFIG.TELEGRAM_BOT_TOKEN);
+const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
 /**
  * 发送消息到Telegram频道
@@ -53,7 +53,7 @@ class WebSocketMonitor {
   };
 
   constructor() {
-    this.solanaConnection = new Connection(API_CONFIG.SOLANA_RPC_URL, 'confirmed');
+    this.solanaConnection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
   }
 
   /**
@@ -422,7 +422,7 @@ class WebSocketMonitor {
     try {
       console.log('🔗 启动以太坊WebSocket监听...');
       
-      const wsUrl = API_CONFIG.ETHEREUM_WS_URL || API_CONFIG.ETHEREUM_RPC_URL.replace('https://', 'wss://');
+      const wsUrl = 'wss://eth-mainnet.g.alchemy.com/v2/demo';
       this.ethereumProvider = new ethers.providers.WebSocketProvider(wsUrl);
 
       // 监听新区块
@@ -805,7 +805,7 @@ class WebSocketMonitor {
    * 发送Solana现货警报
    */
   private async sendSolanaAlert(signature: string, value: number, slot: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Solana现货警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -843,7 +843,7 @@ class WebSocketMonitor {
     slot: number,
     side?: 'long' | 'short'
   ): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Solana合约警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -900,7 +900,7 @@ ${actionIcon} 操作: *${action}${directionText}*
    * 发送以太坊现货警报
    */
   private async sendEthereumAlert(hash: string, value: string, from: string, to: string): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送以太坊现货警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -932,7 +932,7 @@ ${actionIcon} 操作: *${action}${directionText}*
    * 发送以太坊合约交易警报
    */
   private async sendEthereumContractAlert(tx: any, protocolName: string, eventName: string, estimatedValue: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送以太坊合约警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -980,7 +980,7 @@ ${actionIcon} 操作: *${action}*
    * 发送Hyperliquid现货警报
    */
   private async sendHyperliquidAlert(trade: any, value: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Hyperliquid现货警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -1017,7 +1017,7 @@ ${actionIcon} 操作: *${action}*
    * 发送Hyperliquid合约交易警报
    */
   private async sendHyperliquidContractAlert(trade: any, value: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Hyperliquid合约警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -1057,7 +1057,7 @@ ${actionIcon} 操作: *${action}*
    * 发送Hyperliquid清算警报
    */
   private async sendHyperliquidLiquidationAlert(liquidation: any, value: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送Hyperliquid清算警报到频道: ${channelId}`);
 
     if (!channelId) {
@@ -1234,7 +1234,7 @@ ${actionIcon} 操作: *${action}*
    * 发送比特币警报
    */
   private async sendBitcoinAlert(hash: string, value: number, from: string, to: string, blockHeight: number): Promise<void> {
-    const channelId = BOT_CONFIG.TELEGRAM_CHAT_ID;
+    const channelId = config.TELEGRAM_CHAT_ID;
     console.log(`📱 准备发送比特币警报到频道: ${channelId}`);
 
     if (!channelId) {

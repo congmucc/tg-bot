@@ -6,7 +6,6 @@ import { getTokenBySymbol } from '../config/tokens';
  * 通知类型
  */
 export enum NotificationType {
-  PRICE_ALERT = 'PRICE_ALERT',
   WHALE_TRANSACTION = 'WHALE_TRANSACTION',
   LIQUIDITY_CHANGE = 'LIQUIDITY_CHANGE',
   PORTFOLIO_UPDATE = 'PORTFOLIO_UPDATE'
@@ -99,57 +98,7 @@ export async function sendNotification(
   }
 }
 
-/**
- * 处理价格提醒
- * @param bot Telegraf实例
- * @param tokenSymbol 代币符号
- * @param targetPrice 目标价格
- * @param isAbove 是否是价格上涨提醒
- * @param userId 用户ID
- */
-export async function processPriceAlert(
-  bot: Telegraf,
-  tokenSymbol: string,
-  targetPrice: number,
-  isAbove: boolean,
-  userId: number
-): Promise<boolean> {
-  try {
-    // 获取当前价格
-    const priceData = await getCryptoPrice(tokenSymbol.toLowerCase());
-    const currentPrice = priceData.market_data.current_price.usd;
-    
-    // 检查价格条件
-    let alertTriggered = false;
-    if (isAbove && currentPrice >= targetPrice) {
-      alertTriggered = true;
-    } else if (!isAbove && currentPrice <= targetPrice) {
-      alertTriggered = true;
-    }
-    
-    if (alertTriggered) {
-      // 创建通知
-      const notification = createNotification(
-        NotificationType.PRICE_ALERT,
-        userId,
-        `${tokenSymbol} 价格提醒`,
-        `💰 ${tokenSymbol} 已${isAbove ? '上升至' : '下跌至'} $${currentPrice.toFixed(2)}\n` +
-        `🎯 目标价: $${targetPrice.toFixed(2)}\n\n` +
-        `_此提醒已自动删除_`,
-        { tokenSymbol, currentPrice, targetPrice, isAbove }
-      );
-      
-      // 发送通知
-      return await sendNotification(bot, notification);
-    }
-    
-    return false;
-  } catch (error) {
-    const err = error as Error;
-    console.error(`处理价格提醒失败:`, err.message);
-    return false;
-  }
-}
+
 
 /**
  * 发送大额交易通知
@@ -236,8 +185,7 @@ setInterval(() => {
 export default {
   createNotification,
   sendNotification,
-  processPriceAlert,
   sendWhaleTransactionNotification,
   getUserNotifications,
   cleanupSentNotifications
-}; 
+};

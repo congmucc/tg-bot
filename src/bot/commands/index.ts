@@ -1,4 +1,5 @@
 import { Telegraf, Context } from 'telegraf';
+import { handleStartCommand } from './start';
 import { handlePriceCommand } from './price';
 import { handleLiquidityCommand } from './liquidity';
 import { handleWhaleCommand } from './whale';
@@ -7,7 +8,6 @@ import { handleCompareCommand } from './compare';
 
 import { handleTradeCommand } from './trade';
 import { handleTrendCommand } from './trend';
-import { handleAlertCommand } from './alert';
 import { handleTrackCommand } from './track';
 import { handleHelpCommand } from './help';
 
@@ -16,6 +16,9 @@ import { handleHelpCommand } from './help';
  * @param bot Telegraf机器人实例
  */
 export function registerCommands(bot: Telegraf) {
+  // 注册开始命令
+  bot.command('start', handleStartCommand);
+
   // 注册价格查询命令
   bot.command('price', handlePriceCommand);
   
@@ -37,10 +40,7 @@ export function registerCommands(bot: Telegraf) {
   
   // 注册市场趋势预测命令
   bot.command('trend', handleTrendCommand);
-  
-  // 注册价格提醒命令
-  bot.command('alert', handleAlertCommand);
-  
+
   // 注册钱包跟踪命令
   bot.command('track', handleTrackCommand);
   
@@ -49,6 +49,7 @@ export function registerCommands(bot: Telegraf) {
   
   // 设置命令菜单
   bot.telegram.setMyCommands([
+    { command: 'start', description: '开始使用机器人' },
     { command: 'price', description: '查询代币价格' },
     { command: 'compare', description: '交易平台价格聚合' },
     { command: 'liquidity', description: '分析流动性' },
@@ -56,13 +57,13 @@ export function registerCommands(bot: Telegraf) {
     { command: 'fear', description: '恐惧贪婪指数' },
     { command: 'trade', description: '智能交易建议' },
     { command: 'trend', description: '市场趋势预测' },
-    { command: 'alert', description: '设置价格提醒' },
     { command: 'track', description: '跟踪钱包资产' },
     { command: 'help', description: '显示帮助信息' },
   ]).catch(err => console.error('设置命令菜单失败:', err.message));
 }
 
 export {
+  handleStartCommand,
   handlePriceCommand,
   handleLiquidityCommand,
   handleWhaleCommand,
@@ -70,7 +71,6 @@ export {
   handleCompareCommand,
   handleTradeCommand,
   handleTrendCommand,
-  handleAlertCommand,
   handleTrackCommand,
   handleHelpCommand
-}; 
+};
