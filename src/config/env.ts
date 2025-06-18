@@ -99,7 +99,7 @@ export const BOT_CONFIG = {
   WHALE_MONITOR_BATCH_SIZE: parseInt(process.env.WHALE_MONITOR_BATCH_SIZE || '5'), // 每次最多发送5条
   
   // HTTP服务器配置
-  PORT: parseInt(process.env.PORT || '3001'),
+  PORT: parseInt(process.env.PORT || '3000'),
   
   // 日志配置
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

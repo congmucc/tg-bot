@@ -6,7 +6,7 @@ process.env.WHALE_MONITOR_ENABLED = 'false';
 process.env.WHALE_MONITOR_INTERVAL = '30';
 process.env.WHALE_MONITOR_COOLDOWN = '10';
 process.env.WHALE_MONITOR_BATCH_SIZE = '5';
-process.env.PORT = '3001';
+process.env.PORT = '3000';
 
 // 禁用控制台输出以保持测试输出清洁
 if (process.env.JEST_SILENT !== 'false') {
