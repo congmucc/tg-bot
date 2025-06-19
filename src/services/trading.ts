@@ -47,36 +47,36 @@ export async function simulateTrade(
     if (chain !== 'ethereum') {
       throw new Error(`${chain} 链上交易模拟暂不支持`);
     }
-    
+
     const api = getBlockchainAPI(chain);
     const provider = (api as any).provider;
-    
+
     // 创建路由合约实例
     const routerContract = new ethers.Contract(routerAddress, ROUTER_ABI, provider);
-    
+
     // 转换输入金额
     const tokenInContract = new ethers.Contract(path[0], ERC20_ABI, provider);
     const tokenInDecimals = await tokenInContract.decimals();
     const amountInWei = ethers.utils.parseUnits(amountIn, tokenInDecimals);
-    
+
     // 获取预期输出金额
     const amounts = await routerContract.getAmountsOut(amountInWei, path);
-    
+
     // 转换输出金额
     const tokenOutContract = new ethers.Contract(path[path.length - 1], ERC20_ABI, provider);
     const tokenOutDecimals = await tokenOutContract.decimals();
     const outputAmount = ethers.utils.formatUnits(amounts[amounts.length - 1], tokenOutDecimals);
-    
+
     // 计算最小输出金额 (考虑滑点)
     const minimumOutputAmountWei = amounts[amounts.length - 1]
       .mul(ethers.BigNumber.from(Math.floor(10000 - slippageTolerance * 100)))
       .div(ethers.BigNumber.from(10000));
-    
+
     const minimumOutputAmount = ethers.utils.formatUnits(minimumOutputAmountWei, tokenOutDecimals);
-    
+
     // 计算价格影响 (简化计算，实际情况更复杂)
     const priceImpact = 0.1; // 假设有0.1%的价格影响
-    
+
     return {
       success: true,
       inputAmount: amountIn,
@@ -108,7 +108,7 @@ export function formatTradePreview(
   if (!result.success) {
     return `❌ 交易模拟失败: ${result.error}`;
   }
-  
+
   return `
 💱 *交易预览: ${inputSymbol} → ${outputSymbol}*
 --------------------------

@@ -14,10 +14,10 @@ describe('Blockchain Integration Tests', () => {
     test('should monitor all chains with default parameters', async () => {
       try {
         const results = await monitorLargeTransactions();
-        
+
         // 验证返回结果是数组
         expect(Array.isArray(results)).toBe(true);
-        
+
         // 验证每个结果都有必要的属性
         results.forEach((result: any) => {
           expect(result).toHaveProperty('chain');
@@ -32,7 +32,7 @@ describe('Blockchain Integration Tests', () => {
             expect(result).toHaveProperty('error');
           }
         });
-        
+
         console.log(`Monitored ${results.length} chains`);
         results.forEach((result: any) => {
           if (result.success) {
@@ -43,7 +43,7 @@ describe('Blockchain Integration Tests', () => {
         });
       } catch (error) {
         console.error('Integration test failed:', error);
-        
+
         // 如果是网络错误，跳过测试
         if (error instanceof Error && error.message.includes('network')) {
           console.warn('Skipping test due to network issues');
@@ -66,19 +66,19 @@ describe('Blockchain Integration Tests', () => {
           true,  // include BTC
           false  // exclude HL
         );
-        
+
         expect(Array.isArray(results)).toBe(true);
-        
+
         // 应该只有ETH和BTC的结果
         const chains = results.map((r: any) => r.chain);
         expect(chains).toContain('ethereum');
         expect(chains).toContain('bitcoin');
         expect(chains).not.toContain('solana');
         expect(chains).not.toContain('hyperliquid');
-        
+
       } catch (error) {
         console.error('Selective monitoring test failed:', error);
-        
+
         if (error instanceof Error && error.message.includes('network')) {
           console.warn('Skipping selective monitoring test due to network issues');
           return;
@@ -96,19 +96,19 @@ describe('Blockchain Integration Tests', () => {
           1000,   // 1k BTC
           10000000 // 10M USD
         );
-        
+
         expect(Array.isArray(results)).toBe(true);
-        
+
         results.forEach((result: any) => {
           if (result.success) {
             // 高阈值应该返回很少的交易
             expect(result.count).toBeLessThanOrEqual(10);
           }
         });
-        
+
       } catch (error) {
         console.error('High threshold test failed:', error);
-        
+
         if (error instanceof Error && error.message.includes('network')) {
           console.warn('Skipping high threshold test due to network issues');
           return;
@@ -159,22 +159,22 @@ describe('Blockchain Integration Tests', () => {
           10,  // 正常的BTC阈值
           100000 // 正常的HL阈值
         );
-        
+
         expect(Array.isArray(results)).toBe(true);
         expect(results.length).toBeGreaterThan(0);
-        
+
         // 至少应该有一些成功的结果
         const successfulResults = results.filter((r: any) => r.success);
         const failedResults = results.filter((r: any) => !r.success);
-        
+
         console.log(`Successful: ${successfulResults.length}, Failed: ${failedResults.length}`);
-        
+
         // 即使有失败的，也应该有成功的
         expect(successfulResults.length + failedResults.length).toBe(results.length);
-        
+
       } catch (error) {
         console.error('Error resilience test failed:', error);
-        
+
         if (error instanceof Error && error.message.includes('network')) {
           console.warn('Skipping error resilience test due to network issues');
           return;
@@ -187,20 +187,20 @@ describe('Blockchain Integration Tests', () => {
   describe('Performance', () => {
     test('should complete monitoring within reasonable time', async () => {
       const startTime = Date.now();
-      
+
       try {
         await monitorLargeTransactions(100, 500, 10, 100000);
-        
+
         const endTime = Date.now();
         const duration = endTime - startTime;
-        
+
         // 应该在45秒内完成
         expect(duration).toBeLessThan(45000);
         console.log(`Monitoring completed in ${duration}ms`);
-        
+
       } catch (error) {
         console.error('Performance test failed:', error);
-        
+
         if (error instanceof Error && error.message.includes('network')) {
           console.warn('Skipping performance test due to network issues');
           return;
